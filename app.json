@@ -45,7 +45,7 @@
       ]
     ],
     "cli": {
-      "appVersionSource": "remote"
+      "appVersionSource": "local"
     },
     "scheme": "opencode-remote",
     "extra": {
@@ -56,7 +56,7 @@
         "projectId": "your-project-id"
       }
     },
-    "owner": "your-expo-username",
+    "owner": "nazax44",
     "runtimeVersion": {
       "policy": "appVersion"
     },
