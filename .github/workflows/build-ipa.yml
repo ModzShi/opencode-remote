@@ -42,8 +42,13 @@ jobs:
           cd ios
 
           WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
-          SCHEME=$(xcodebuild -list -json -workspace "$WORKSPACE" | jq -r '.workspace.schemes[]' | grep -v '^Pods' | head -n 1)
+          PROJECT=$(ls -d *.xcodeproj | head -n 1)
+          SCHEME=$(xcodebuild -list -json -project "$PROJECT" | jq -r '.project.schemes[0]')
+          if [ -z "$SCHEME" ] || [ "$SCHEME" = "null" ]; then
+            SCHEME="${WORKSPACE%.xcworkspace}"
+          fi
           echo "Workspace: $WORKSPACE"
+          echo "Project: $PROJECT"
           echo "Scheme: $SCHEME"
           if [ -z "$SCHEME" ]; then echo "No scheme found"; exit 1; fi
 
@@ -60,8 +65,13 @@ jobs:
             DEVELOPMENT_TEAM="" \
             archive
 
-          APP_PATH=$(find build/App.xcarchive/Products/Applications -maxdepth 1 -name "*.app" | head -n 1)
+          APP_PATH=$(find build/App.xcarchive/Products/Applications -maxdepth 1 -name "*.app" 2>/dev/null | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "App not in Products/Applications, searching archive..."
+            APP_PATH=$(find build/App.xcarchive -maxdepth 4 -name "*.app" 2>/dev/null | head -n 1)
+          fi
           echo "App bundle: $APP_PATH"
+          if [ -z "$APP_PATH" ]; then echo "No .app produced by archive"; exit 1; fi
 
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
