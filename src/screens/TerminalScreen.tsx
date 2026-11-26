@@ -4,8 +4,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/useTheme';
 import { useAppStore } from '@/store';
 import { Button, Card, Input } from '@/components/ui';
-import { Send, X, ChevronDown, ChevronUp, Terminal, FolderOpen, Settings, MoreVertical, Trash2, Copy, RotateCcw, Zap, Mic, Keyboard as KeyboardIcon } from 'lucide-react-native';
-import { useAnimatedStyle, withTiming, useSharedValue, runOnJS } from 'react-native-reanimated';
+import { Send, Terminal, FolderOpen, Settings, RotateCcw, Zap } from 'lucide-react-native';
 
 export default function TerminalScreen() {
   const router = useRouter();
@@ -32,8 +31,6 @@ export default function TerminalScreen() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const messagesEndRef = useRef<View>(null);
-  const inputHeight = useSharedValue(44);
-  const keyboardHeight = useSharedValue(0);
 
   const session = sessions.find(s => s.id === activeSessionId);
   const sessionMessages = messages[activeSessionId || ''] || [];

@@ -6,11 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0a0a0f"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.opencode.remote",
@@ -34,7 +29,6 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store",
       [
         "expo-camera",
         {
@@ -42,11 +36,11 @@
         }
       ],
       [
-        "expo-build-properties",
+        "expo-splash-screen",
         {
-          "ios": {
-            "deploymentTarget": "16.4"
-          }
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#0a0a0f"
         }
       ]
     ],
