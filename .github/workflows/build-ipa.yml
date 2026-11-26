@@ -26,6 +26,8 @@ jobs:
     name: Build IPA (${{ github.event.inputs.profile || 'preview' }})
     runs-on: macos-latest
     timeout-minutes: 60
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
     
     steps:
       - name: Checkout repository
