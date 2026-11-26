@@ -38,7 +38,7 @@ jobs:
 
       - name: Build unsigned IPA with xcodebuild
         run: |
-          set -euo pipefail
+          set -uo pipefail
           cd ios
 
           WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
@@ -52,6 +52,7 @@ jobs:
           echo "Scheme: $SCHEME"
           if [ -z "$SCHEME" ]; then echo "No scheme found"; exit 1; fi
 
+          set +e
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
@@ -63,7 +64,26 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            archive
+            archive > build.log 2>&1
+          XC_STATUS=$?
+          set -e
+
+          if [ $XC_STATUS -ne 0 ]; then
+            echo "xcodebuild failed with exit code $XC_STATUS"
+            echo "----- ERROR LINES -----"
+            grep -n -i "error:" build.log | tail -40 || true
+            FIRST_ERROR=$(grep -i -m1 "error:" build.log || true)
+            SECOND_ERROR=$(grep -i "error:" build.log | sed -n '2p' || true)
+            if [ -n "$FIRST_ERROR" ]; then
+              echo "::error title=Xcode error 1::${FIRST_ERROR}"
+            fi
+            if [ -n "$SECOND_ERROR" ]; then
+              echo "::error title=Xcode error 2::${SECOND_ERROR}"
+            fi
+            echo "----- LAST 120 LINES -----"
+            tail -120 build.log
+            exit 1
+          fi
 
           APP_PATH=$(find build/App.xcarchive/Products/Applications -maxdepth 1 -name "*.app" 2>/dev/null | head -n 1)
           if [ -z "$APP_PATH" ]; then
