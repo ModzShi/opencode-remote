@@ -44,6 +44,9 @@
         }
       ]
     ],
+    "cli": {
+      "appVersionSource": "remote"
+    },
     "scheme": "opencode-remote",
     "extra": {
       "router": {
