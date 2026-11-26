@@ -29,6 +29,8 @@ export interface PairingData {
   publicKey: string;
   endpoint: string;
   expiresAt: number;
+  /** Server auth token obtained from /auth/connect/{code} */
+  token?: string;
 }
 
 export interface AppSettings {

@@ -17,7 +17,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { useAppStore } from '@/store';
 import { Button, Card, Input } from '@/components/ui';
 import { QRScanner } from '@/components/QRScanner';
-import { normalizeEndpoint, parsePairingPayload } from '@/utils/pairing';
+import { normalizeEndpoint, parsePairingPayload, exchangePairingCode, buildSseEndpoint } from '@/utils/pairing';
 import { websocket } from '@/utils/websocket';
 import { PairingData } from '@/types';
 import {
@@ -59,9 +59,35 @@ export default function PairingScreen() {
 
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const applyPairing = (data: PairingData) => {
-    websocket.connect(data);
-    setPairedSession(data);
+  const applyPairing = async (data: PairingData) => {
+    // If we have a token in format "baseUrl|pairingCode", exchange it first
+    let pairingData = data;
+    
+    if (data.token && data.token.includes('|')) {
+      const [baseUrl, pairingCode] = data.token.split('|');
+      const token = await exchangePairingCode(baseUrl, pairingCode);
+      
+      if (!token) {
+        Alert.alert(
+          'Falha no pareamento',
+          'Não foi possível obter o token do servidor. Verifique se o QR Code não expirou (5 min).'
+        );
+        return;
+      }
+      
+      // Build SSE endpoint with the obtained token
+      const sseEndpoint = buildSseEndpoint(baseUrl, token);
+      
+      pairingData = {
+        ...data,
+        endpoint: sseEndpoint,
+        publicKey: token, // Store token as publicKey for auth
+        token: undefined, // Clear the raw token
+      };
+    }
+    
+    websocket.connect(pairingData);
+    setPairedSession(pairingData);
     if (settings.hapticsEnabled) Vibration.vibrate(40);
     router.replace('/(tabs)/terminal');
   };
@@ -81,11 +107,11 @@ export default function PairingScreen() {
     return true;
   };
 
-  const handleManualPair = () => {
+  const handleManualPair = async () => {
     const parsed = parsePairingPayload(manualUrl);
 
     if (parsed?.publicKey) {
-      applyPairing(parsed);
+      await applyPairing(parsed);
       return;
     }
 
@@ -97,7 +123,7 @@ export default function PairingScreen() {
       return;
     }
 
-    applyPairing({
+    await applyPairing({
       endpoint: normalizeEndpoint(manualUrl),
       publicKey: manualToken.trim(),
       sessionId: `manual-${Date.now()}`,
@@ -166,7 +192,7 @@ export default function PairingScreen() {
 
       const parsed = parsePairingPayload(text);
       if (parsed) {
-        applyPairing(parsed);
+        await applyPairing(parsed);
         return;
       }
 
@@ -306,7 +332,7 @@ export default function PairingScreen() {
               Conexão manual
             </Text>
             <Text style={[styles.cardText, { color: colors.mutedForeground }]}>
-              Use os dados de <Text style={styles.inlineMono}>opencode pair --show-key</Text>.
+              Use o link de <Text style={styles.inlineMono}>opencode pair --remote</Text> ou dados de pareamento.
             </Text>
 
             <View style={styles.fieldRow}>

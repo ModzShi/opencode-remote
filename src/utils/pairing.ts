@@ -39,6 +39,32 @@ function parseQuery(text: string): Record<string, string> {
   return result;
 }
 
+/**
+ * Exchange pairing code for auth token.
+ * GET /auth/connect/{code} returns { "token": "..." }
+ */
+export async function exchangePairingCode(baseUrl: string, code: string): Promise<string | null> {
+  try {
+    const url = `${baseUrl.replace(/\/+$/, '')}/auth/connect/${code}`;
+    const response = await fetch(url, { method: 'GET' });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data?.token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build SSE endpoint with auth_token from token.
+ * auth_token = base64("opencode:" + token)
+ */
+export function buildSseEndpoint(baseUrl: string, token: string): string {
+  const authToken = btoa(`opencode:${token}`);
+  const base = baseUrl.replace(/\/+$/, '');
+  return `${base}/api/event?auth_token=${encodeURIComponent(authToken)}`;
+}
+
 export function normalizeEndpoint(value: string): string {
   let endpoint = value.trim();
 
@@ -61,6 +87,7 @@ export function normalizeEndpoint(value: string): string {
  * - URL: opencode-remote://pair?endpoint=...&key=...
  * - URL direta: ws://192.168.0.10:4096
  * - host:porta
+ * - HTTPS pairing: https://host/auth/connect/CODE (one-time code, expires 5 min)
  */
 export function parsePairingPayload(raw: string): PairingData | null {
   const text = raw.trim();
@@ -165,11 +192,30 @@ export function parsePairingPayload(raw: string): PairingData | null {
         ? candidate.expires_at
         : Date.now() + 24 * 60 * 60 * 1000;
 
+  // Extract baseUrl and pairing code for HTTPS pairing URLs
+  let baseUrl = '';
+  let pairingCode = '';
+  if (text.startsWith('https://') || text.startsWith('http://')) {
+    try {
+      const url = new URL(text);
+      baseUrl = `${url.protocol}//${url.host}`;
+      // Extract code from /auth/connect/CODE path
+      const pathParts = url.pathname.split('/').filter(Boolean);
+      if (pathParts[0] === 'auth' && pathParts[1] === 'connect' && pathParts[2]) {
+        pairingCode = pathParts[2];
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   return {
     endpoint: normalizeEndpoint(endpoint),
     publicKey,
     sessionId,
     expiresAt,
+    // Store baseUrl and pairingCode for token exchange
+    token: pairingCode ? `${baseUrl}|${pairingCode}` : undefined,
   };
 }
 
