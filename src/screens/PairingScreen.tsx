@@ -1,345 +1,489 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import React, { useRef, useState } from 'react';
+import {
+  Alert,
+  Clipboard,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  Vibration,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/useTheme';
 import { useAppStore } from '@/store';
 import { Button, Card, Input } from '@/components/ui';
 import { QRScanner } from '@/components/QRScanner';
-import { Wifi, QrCode, Settings, HelpCircle, CheckCircle, AlertCircle, Loader2 } from 'lucide-react-native';
-import { Linking, Clipboard, Vibration } from 'react-native';
+import { normalizeEndpoint, parsePairingPayload } from '@/utils/pairing';
+import { websocket } from '@/utils/websocket';
+import { PairingData } from '@/types';
+import {
+  Camera,
+  Check,
+  Copy,
+  QrCode,
+  Settings as SettingsIcon,
+  Wifi,
+  WifiOff,
+} from 'lucide-react-native';
+import { radius } from '@/theme';
+
+const STATUS_LABEL: Record<string, string> = {
+  connected: 'Conectado',
+  connecting: 'Conectando…',
+  reconnecting: 'Reconectando…',
+  disconnected: 'Desconectado',
+  error: 'Falha na conexão',
+};
 
 export default function PairingScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { pairedSession, setPairedSession, setConnectionStatus, connectionStatus, settings } = useAppStore();
+
+  const pairedSession = useAppStore((state) => state.pairedSession);
+  const connectionStatus = useAppStore((state) => state.connectionStatus);
+  const setPairedSession = useAppStore((state) => state.setPairedSession);
+  const settings = useAppStore((state) => state.settings);
+  const clearPairing = useAppStore((state) => state.clearPairing);
+
   const [mode, setMode] = useState<'scan' | 'manual'>('scan');
+  const [scannerOpen, setScannerOpen] = useState(false);
   const [manualUrl, setManualUrl] = useState('');
   const [manualToken, setManualToken] = useState('');
-  const [scanning, setScanning] = useState(false);
-  const [lastScanned, setLastScanned] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    if (pairedSession && connectionStatus !== 'connected') {
-      router.replace('/(tabs)/terminal');
-    }
-  }, [pairedSession, connectionStatus, router]);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleScan = async (data: string) => {
-    try {
-      const parsed = JSON.parse(data);
-      if (parsed.type === 'pairing' && parsed.payload) {
-        await pairWithServer(parsed.payload);
-      } else if (parsed.endpoint && parsed.publicKey) {
-        await pairWithServer(parsed);
-      } else {
-        throw new Error('Formato de QR Code inválido');
-      }
-    } catch (e) {
-      Alert.alert('Erro', 'QR Code inválido. Certifique-se de escanear o código do OpenCode.');
-      setScanning(false);
-    }
+  const applyPairing = (data: PairingData) => {
+    websocket.connect(data);
+    setPairedSession(data);
+    if (settings.hapticsEnabled) Vibration.vibrate(40);
+    router.replace('/(tabs)/terminal');
   };
 
-  const pairWithServer = async (pairingData: any) => {
-    setConnectionStatus('connecting');
-    try {
-      // Simula conexão - na versão real conecta via WebSocket
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      if (settings.hapticsEnabled) {
-        Vibration.vibrate(50);
-      }
-      
-      setPairedSession({
-        sessionId: pairingData.sessionId || `session-${Date.now()}`,
-        publicKey: pairingData.publicKey,
-        endpoint: pairingData.endpoint || manualUrl,
-        expiresAt: pairingData.expiresAt || Date.now() + 86400000,
-      });
-      
-      setConnectionStatus('connected');
-      router.replace('/(tabs)/terminal');
-    } catch (error) {
-      setConnectionStatus('error');
-      setScanning(false);
-      Alert.alert('Erro de Conexão', 'Não foi possível conectar ao servidor OpenCode.');
+  const handleScan = (raw: string): boolean => {
+    const parsed = parsePairingPayload(raw);
+    if (!parsed) {
+      Alert.alert(
+        'QR Code não reconhecido',
+        'Use o QR Code gerado por "opencode pair --remote" no terminal do PC.'
+      );
+      return false;
     }
+
+    setScannerOpen(false);
+    applyPairing(parsed);
+    return true;
   };
 
-  const handleManualPair = async () => {
-    if (!manualUrl || !manualToken) {
-      Alert.alert('Campos Obrigatórios', 'Preencha a URL do servidor e o token de pareamento.');
+  const handleManualPair = () => {
+    const parsed = parsePairingPayload(manualUrl);
+
+    if (parsed?.publicKey) {
+      applyPairing(parsed);
       return;
     }
-    await pairWithServer({
-      endpoint: manualUrl,
-      publicKey: manualToken,
+
+    if (!manualUrl.trim() || !manualToken.trim()) {
+      Alert.alert(
+        'Dados incompletos',
+        'Informe o endereço do PC e o token de pareamento.'
+      );
+      return;
+    }
+
+    applyPairing({
+      endpoint: normalizeEndpoint(manualUrl),
+      publicKey: manualToken.trim(),
       sessionId: `manual-${Date.now()}`,
-      expiresAt: Date.now() + 86400000,
+      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
     });
   };
 
-  const copyToClipboard = (text: string) => {
-    Clipboard.setString(text);
-    if (settings.hapticsEnabled) Vibration.vibrate(30);
+  const copyCommand = () => {
+    try {
+      Clipboard.setString('opencode pair --remote');
+      setCopied(true);
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 1600);
+      if (settings.hapticsEnabled) Vibration.vibrate(20);
+    } catch {
+      // Clipboard indisponível: ignora silenciosamente.
+    }
   };
 
+  const connected = connectionStatus === 'connected';
+  const statusColor =
+    connectionStatus === 'connected'
+      ? colors.success
+      : connectionStatus === 'error'
+        ? colors.destructive
+        : colors.warning;
+
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.headerIcon}>
-            <Wifi size={32} color={colors.primary} />
+    <KeyboardAvoidingView
+      style={[styles.screen, { backgroundColor: colors.background }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + 10, paddingBottom: insets.bottom + 28 },
+        ]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.hero}>
+          <View style={[styles.logo, { backgroundColor: colors.primaryMuted }]}>
+            <Wifi size={22} color={colors.primary} />
           </View>
-          <View style={styles.headerText}>
+          <View style={styles.heroText}>
             <Text style={[styles.title, { color: colors.foreground }]}>OpenCode Remote</Text>
             <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-              Conecte ao seu PC via QR Code
+              Controle o OpenCode do seu PC pelo celular
             </Text>
           </View>
         </View>
 
-        {/* Mode Toggle */}
-        <View style={styles.modeToggle}>
-          <TouchableOpacity
+        <View style={[styles.segment, { backgroundColor: colors.muted }]}>
+          <Pressable
             style={[
-              styles.modeButton,
-              mode === 'scan' ? styles.modeButtonActive : {},
+              styles.segmentItem,
+              mode === 'scan' && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
             ]}
-            onPress={() => { setMode('scan'); setScanning(true); }}
+            onPress={() => setMode('scan')}
           >
-            <QrCode size={20} color={mode === 'scan' ? colors.primaryForeground : colors.mutedForeground} />
-            <Text style={[
-              styles.modeButtonText,
-              { color: mode === 'scan' ? colors.primaryForeground : colors.mutedForeground }
-            ]}>
-              Escanear QR
+            <QrCode
+              size={15}
+              color={mode === 'scan' ? colors.foreground : colors.mutedForeground}
+            />
+            <Text
+              style={[
+                styles.segmentText,
+                { color: mode === 'scan' ? colors.foreground : colors.mutedForeground },
+              ]}
+            >
+              QR Code
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+          </Pressable>
+          <Pressable
             style={[
-              styles.modeButton,
-              mode === 'manual' ? styles.modeButtonActive : {},
+              styles.segmentItem,
+              mode === 'manual' && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
             ]}
-            onPress={() => { setMode('manual'); setScanning(false); }}
+            onPress={() => setMode('manual')}
           >
-            <Settings size={20} color={mode === 'manual' ? colors.primaryForeground : colors.mutedForeground} />
-            <Text style={[
-              styles.modeButtonText,
-              { color: mode === 'manual' ? colors.primaryForeground : colors.mutedForeground }
-            ]}>
+            <SettingsIcon
+              size={15}
+              color={mode === 'manual' ? colors.foreground : colors.mutedForeground}
+            />
+            <Text
+              style={[
+                styles.segmentText,
+                { color: mode === 'manual' ? colors.foreground : colors.mutedForeground },
+              ]}
+            >
               Manual
             </Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
         {mode === 'scan' ? (
-          <View style={styles.scanSection}>
-            {scanning ? (
-              <QRScanner
-                onScan={handleScan}
-                onClose={() => setScanning(false)}
-              />
-            ) : (
-              <Card variant="outlined" style={styles.scanCard}>
-                <View style={styles.scanCardContent}>
-                  <QrCode size={64} color={colors.primary} style={styles.scanIcon} />
-                  <Text style={[styles.scanTitle, { color: colors.foreground }]}>
-                    Pronto para Escanear
-                  </Text>
-                  <Text style={[styles.scanDesc, { color: colors.mutedForeground }]}>
-                    Toque no botão abaixo e aponte a câmera para o QR Code mostrado no terminal do OpenCode
-                  </Text>
-                  <Button
-                    variant="primary"
-                    size="lg"
-                    fullWidth
-                    leftIcon={<QrCode size={20} color={colors.primaryForeground} />}
-                    onPress={() => setScanning(true)}
-                    style={styles.scanButton}
-                  >
-                    Abrir Câmera
-                  </Button>
-                </View>
-              </Card>
-            )}
+          <Card style={styles.card}>
+            <View style={[styles.scanIcon, { backgroundColor: colors.primaryMuted }]}>
+              <QrCode size={28} color={colors.primary} />
+            </View>
+            <Text style={[styles.cardTitle, { color: colors.foreground }]}>Parear com o PC</Text>
+            <Text style={[styles.cardText, { color: colors.mutedForeground }]}>
+              No terminal do computador, rode o comando abaixo e escaneie o QR Code que aparecer.
+            </Text>
 
-            <Card variant="default" style={styles.helpCard}>
-              <View style={styles.helpRow}>
-                <HelpCircle size={20} color={colors.primary} />
-                <Text style={[styles.helpText, { color: colors.foreground, flex: 1 }]}>
-                  No terminal do PC, execute: <Text style={{ fontFamily: 'monospace', fontWeight: '600' }}> opencode pair --remote </Text>
-                </Text>
-              </View>
-              <View style={styles.helpRow}>
-                <HelpCircle size={20} color={colors.primary} />
-                <Text style={[styles.helpText, { color: colors.foreground, flex: 1 }]}>
-                  Ou gere o QR Code manualmente com: <Text style={{ fontFamily: 'monospace', fontWeight: '600' }}> opencode pair --show-key </Text>
-                </Text>
-              </View>
-            </Card>
-          </View>
-        ) : (
-          <View style={styles.manualSection}>
-            <Card variant="default" style={styles.manualCard}>
-              <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
-                Configuração Manual
-              </Text>
-              <Text style={[styles.sectionDesc, { color: colors.mutedForeground }]}>
-                Insira os dados obtidos com <Text style={{ fontFamily: 'monospace' }}>opencode pair --show-key</Text>
-              </Text>
-
-              <Input
-                label="URL do Servidor (ex: ws://192.168.1.100:8080)"
-                placeholder="ws://IP_DO_PC:PORTA"
-                value={manualUrl}
-                onChangeText={setManualUrl}
-                style={styles.manualInput}
-                autoCapitalize="none"
-                keyboardType="url"
-              />
-
-              <Input
-                label="Token de Pareamento / Chave Pública"
-                placeholder="Cole a chave pública aqui"
-                value={manualToken}
-                onChangeText={setManualToken}
-                style={styles.manualInput}
-                autoCapitalize="none"
-              />
-
-              <Button
-                variant="primary"
-                fullWidth
-                size="lg"
-                onPress={handleManualPair}
-                disabled={connectionStatus === 'connecting'}
-                loading={connectionStatus === 'connecting'}
-                style={styles.manualButton}
+            <Pressable
+              onPress={copyCommand}
+              style={[
+                styles.command,
+                { backgroundColor: colors.muted, borderColor: colors.border },
+              ]}
+            >
+              <Text
+                style={[styles.commandText, { color: colors.foreground }]}
+                numberOfLines={1}
               >
-                {connectionStatus === 'connecting' ? (
-                  <>
-                    <Loader2 size={20} color={colors.primaryForeground} style={styles.spinner} />
-                    Conectando...
-                  </>
-                ) : (
-                  'Conectar'
-                )}
-              </Button>
-            </Card>
-          </View>
+                opencode pair --remote
+              </Text>
+              {copied ? (
+                <Check size={15} color={colors.success} />
+              ) : (
+                <Copy size={15} color={colors.mutedForeground} />
+              )}
+            </Pressable>
+
+            <Button
+              size="lg"
+              fullWidth
+              leftIcon={<Camera size={18} color={colors.primaryForeground} />}
+              onPress={() => setScannerOpen(true)}
+            >
+              Abrir câmera
+            </Button>
+          </Card>
+        ) : (
+          <Card style={styles.card}>
+            <Text style={[styles.cardTitle, { color: colors.foreground }]}>
+              Conexão manual
+            </Text>
+            <Text style={[styles.cardText, { color: colors.mutedForeground }]}>
+              Use os dados de <Text style={styles.inlineMono}>opencode pair --show-key</Text>.
+            </Text>
+
+            <Input
+              label="Endereço do PC"
+              placeholder="ws://192.168.0.10:4096"
+              value={manualUrl}
+              onChangeText={setManualUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              containerStyle={styles.field}
+            />
+
+            <Input
+              label="Token de pareamento"
+              placeholder="Cole a chave gerada pelo OpenCode"
+              value={manualToken}
+              onChangeText={setManualToken}
+              autoCapitalize="none"
+              autoCorrect={false}
+              containerStyle={styles.field}
+            />
+
+            <Button size="lg" fullWidth onPress={handleManualPair}>
+              Conectar
+            </Button>
+          </Card>
         )}
 
-        {/* Status */}
-        {pairedSession && (
-          <Card variant="elevated" style={styles.statusCard}>
+        <View style={styles.tips}>
+          <Tip text="O celular e o PC precisam estar na mesma rede Wi-Fi." />
+          <Tip text="O QR Code expira rápido. Gere um novo se necessário." />
+        </View>
+
+        {pairedSession ? (
+          <Card style={styles.statusCard}>
             <View style={styles.statusRow}>
-              <View style={[
-                styles.statusDot,
-                { backgroundColor: connectionStatus === 'connected' ? colors.success : colors.warning }
-              ]} />
+              <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
               <View style={styles.statusInfo}>
                 <Text style={[styles.statusLabel, { color: colors.foreground }]}>
-                  {connectionStatus === 'connected' ? 'Conectado' : 'Conectando...'}
+                  {STATUS_LABEL[connectionStatus] ?? connectionStatus}
                 </Text>
-                <Text style={[styles.statusValue, { color: colors.mutedForeground, fontFamily: 'monospace' }]}>
+                <Text
+                  style={[styles.statusValue, { color: colors.mutedForeground }]}
+                  numberOfLines={1}
+                >
                   {pairedSession.endpoint}
                 </Text>
               </View>
+              {connected ? (
+                <Wifi size={18} color={colors.success} />
+              ) : (
+                <WifiOff size={18} color={colors.mutedForeground} />
+              )}
             </View>
+            <Button
+              variant="ghost"
+              size="sm"
+              onPress={() => {
+                websocket.disconnect();
+                clearPairing();
+              }}
+              textStyle={{ color: colors.destructive }}
+              style={styles.disconnect}
+            >
+              Desconectar
+            </Button>
           </Card>
-        )}
+        ) : null}
       </ScrollView>
+
+      <QRScanner
+        visible={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onScan={handleScan}
+        hapticsEnabled={settings.hapticsEnabled}
+      />
+    </KeyboardAvoidingView>
+  );
+}
+
+function Tip({ text }: { text: string }) {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.tipRow}>
+      <View style={[styles.tipDot, { backgroundColor: colors.border }]} />
+      <Text style={[styles.tipText, { color: colors.mutedForeground }]}>{text}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
   },
-  scrollContent: {
-    flexGrow: 1,
-    padding: 20,
-    paddingBottom: 40,
-    gap: 20,
+  content: {
+    paddingHorizontal: 16,
+    gap: 14,
   },
-  header: {
+  hero: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-    marginTop: 10,
+    gap: 12,
+    paddingTop: 6,
   },
-  headerIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
-    backgroundColor: 'rgba(77, 166, 255, 0.15)',
+  logo: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerText: { flex: 1 },
+  heroText: {
+    flex: 1,
+  },
   title: {
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: '700',
-    letterSpacing: -0.5,
+    letterSpacing: -0.3,
   },
   subtitle: {
-    fontSize: 15,
-    marginTop: 2,
+    fontSize: 12.5,
+    marginTop: 1,
   },
-  modeToggle: {
+  segment: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(128, 128, 128, 0.1)',
-    borderRadius: 12,
-    padding: 4,
+    borderRadius: radius.md,
+    padding: 3,
+    gap: 3,
   },
-  modeButton: {
+  segmentItem: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 10,
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: radius.sm + 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'transparent',
   },
-  modeButtonActive: {
-    backgroundColor: '#0066cc',
-  },
-  modeButtonText: {
-    fontSize: 14,
+  segmentText: {
+    fontSize: 13,
     fontWeight: '600',
   },
-  scanSection: { gap: 16 },
-  scanCard: { padding: 32 },
-  scanCardContent: { alignItems: 'center', gap: 16 },
-  scanIcon: { opacity: 0.8 },
-  scanTitle: { fontSize: 20, fontWeight: '600', textAlign: 'center' },
-  scanDesc: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  scanButton: { marginTop: 8 },
-  helpCard: { padding: 16 },
-  helpRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
+  card: {
+    padding: 18,
+    alignItems: 'stretch',
+  },
+  scanIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
     marginBottom: 12,
   },
-  helpText: { fontSize: 13, lineHeight: 19 },
-  manualSection: { gap: 16 },
-  manualCard: { padding: 20 },
-  sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 4 },
-  sectionDesc: { fontSize: 13, lineHeight: 19, marginBottom: 20 },
-  manualInput: { marginBottom: 16 },
-  manualButton: { marginTop: 8 },
-  statusCard: { padding: 16 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  statusDot: { width: 10, height: 10, borderRadius: 5 },
-  statusInfo: { flex: 1 },
-  statusLabel: { fontSize: 14, fontWeight: '600' },
-  statusValue: { fontSize: 12, marginTop: 2 },
-  spinner: {
-    // rotation animation would be added via Animated
+  cardTitle: {
+    fontSize: 16.5,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  cardText: {
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginTop: 5,
+    marginBottom: 14,
+  },
+  command: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 14,
+  },
+  commandText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    fontFamily: 'Menlo',
+    flex: 1,
+  },
+  inlineMono: {
+    fontFamily: 'Menlo',
+    fontSize: 12,
+  },
+  field: {
+    marginBottom: 12,
+  },
+  tips: {
+    gap: 6,
+    paddingHorizontal: 4,
+  },
+  tipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  tipDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+  },
+  tipText: {
+    fontSize: 12,
+    lineHeight: 17,
+    flex: 1,
+  },
+  statusCard: {
+    padding: 14,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusInfo: {
+    flex: 1,
+  },
+  statusLabel: {
+    fontSize: 13.5,
+    fontWeight: '600',
+  },
+  statusValue: {
+    fontSize: 11.5,
+    marginTop: 1,
+    fontFamily: 'Menlo',
+  },
+  disconnect: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
   },
 });

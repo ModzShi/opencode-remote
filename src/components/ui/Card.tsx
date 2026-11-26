@@ -1,53 +1,54 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
+import { radius } from '@/theme';
 
 interface CardProps extends React.ComponentPropsWithoutRef<typeof View> {
-  variant?: 'default' | 'elevated' | 'outlined';
+  variant?: 'default' | 'elevated' | 'outlined' | 'plain';
   padding?: 'none' | 'sm' | 'md' | 'lg';
 }
 
-export const Card = React.forwardRef<View, CardProps>(
-  ({ variant = 'default', padding = 'md', style, children, ...props }, ref) => {
-    const { colors } = useTheme();
+const paddings = { none: 0, sm: 10, md: 14, lg: 18 };
 
-    const variantStyles = {
+export const Card = React.forwardRef<React.ComponentRef<typeof View>, CardProps>(
+  ({ variant = 'default', padding = 'md', style, children, ...props }, ref) => {
+    const { colors, isDark } = useTheme();
+
+    const variants = {
       default: {
         backgroundColor: colors.card,
         borderColor: colors.border,
-        borderWidth: 1,
+        borderWidth: StyleSheet.hairlineWidth,
       },
       elevated: {
         backgroundColor: colors.surfaceElevated,
-        borderColor: 'transparent',
-        borderWidth: 0,
+        borderColor: colors.border,
+        borderWidth: StyleSheet.hairlineWidth,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 8,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: isDark ? 0.35 : 0.08,
+        shadowRadius: 14,
+        elevation: 6,
       },
       outlined: {
         backgroundColor: 'transparent',
         borderColor: colors.border,
-        borderWidth: 1.5,
+        borderWidth: 1,
       },
-    };
-
-    const paddingStyles = {
-      none: 0,
-      sm: 12,
-      md: 16,
-      lg: 24,
-    };
+      plain: {
+        backgroundColor: colors.surface,
+        borderColor: 'transparent',
+        borderWidth: 0,
+      },
+    } as const;
 
     return (
       <View
         ref={ref}
         style={[
           styles.container,
-          variantStyles[variant],
-          { padding: paddingStyles[padding], borderRadius: 12 },
+          { borderRadius: radius.lg, padding: paddings[padding] },
+          variants[variant],
           style,
         ]}
         {...props}
@@ -61,5 +62,7 @@ export const Card = React.forwardRef<View, CardProps>(
 Card.displayName = 'Card';
 
 const styles = StyleSheet.create({
-  container: {},
+  container: {
+    // sem overflow: hidden para não cortar a sombra do variant elevated
+  },
 });

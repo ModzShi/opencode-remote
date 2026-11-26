@@ -1,6 +1,7 @@
 import React from 'react';
-import { TextInput, View, Text, StyleSheet } from 'react-native';
+import { TextInput, View, Text, StyleSheet, StyleProp, ViewStyle } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
+import { radius } from '@/theme';
 
 interface InputProps extends React.ComponentPropsWithoutRef<typeof TextInput> {
   label?: string;
@@ -8,28 +9,21 @@ interface InputProps extends React.ComponentPropsWithoutRef<typeof TextInput> {
   helperText?: string;
   leftIcon?: React.ReactNode;
   rightIcon?: React.ReactNode;
+  containerStyle?: StyleProp<ViewStyle>;
 }
 
-export const Input = React.forwardRef<TextInput, InputProps>(
+export const Input = React.forwardRef<React.ComponentRef<typeof TextInput>, InputProps>(
   (
-    {
-      label,
-      error,
-      helperText,
-      leftIcon,
-      rightIcon,
-      style,
-      ...props
-    },
+    { label, error, helperText, leftIcon, rightIcon, style, containerStyle, ...props },
     ref
   ) => {
     const { colors } = useTheme();
 
     return (
-      <View style={styles.container}>
-        {label && (
-          <Text style={[styles.label, { color: colors.foreground }]}>{label}</Text>
-        )}
+      <View style={[styles.container, containerStyle]}>
+        {label ? (
+          <Text style={[styles.label, { color: colors.mutedForeground }]}>{label}</Text>
+        ) : null}
         <View
           style={[
             styles.inputWrapper,
@@ -39,25 +33,20 @@ export const Input = React.forwardRef<TextInput, InputProps>(
             },
           ]}
         >
-          {leftIcon && (
-            <View style={styles.iconWrapper}>{leftIcon}</View>
-          )}
+          {leftIcon ? <View style={styles.iconWrapper}>{leftIcon}</View> : null}
           <TextInput
             ref={ref}
-            style={[
-              styles.input,
-              { color: colors.foreground, paddingLeft: leftIcon ? 0 : undefined },
-            ]}
+            placeholderTextColor={colors.mutedForeground}
+            style={[styles.input, { color: colors.foreground }, style]}
             {...props}
           />
-          {rightIcon && (
-            <View style={styles.iconWrapper}>{rightIcon}</View>
-          )}
+          {rightIcon ? <View style={styles.iconWrapper}>{rightIcon}</View> : null}
         </View>
-        {error && <Text style={[styles.errorText, { color: colors.destructive }]}>{error}</Text>}
-        {!error && helperText && (
+        {error ? (
+          <Text style={[styles.errorText, { color: colors.destructive }]}>{error}</Text>
+        ) : helperText ? (
           <Text style={[styles.helperText, { color: colors.mutedForeground }]}>{helperText}</Text>
-        )}
+        ) : null}
       </View>
     );
   }
@@ -67,20 +56,20 @@ Input.displayName = 'Input';
 
 const styles = StyleSheet.create({
   container: {
-    gap: 6,
     width: '100%',
   },
   label: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 12.5,
+    fontWeight: '600',
+    marginBottom: 6,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: radius.md,
     paddingHorizontal: 12,
-    minHeight: 44,
+    minHeight: 42,
   },
   iconWrapper: {
     paddingHorizontal: 4,
@@ -88,13 +77,15 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 15,
-    paddingVertical: 0,
+    paddingVertical: 10,
   },
   errorText: {
     fontSize: 12,
     fontWeight: '500',
+    marginTop: 5,
   },
   helperText: {
     fontSize: 12,
+    marginTop: 5,
   },
 });

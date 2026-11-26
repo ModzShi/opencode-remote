@@ -1,0 +1,166 @@
+import { PairingData } from '@/types';
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function safeJson(text: string): any {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function parseQuery(text: string): Record<string, string> {
+  const queryIndex = text.indexOf('?');
+  if (queryIndex === -1) return {};
+
+  const query = text.slice(queryIndex + 1).split('#')[0];
+  const result: Record<string, string> = {};
+
+  for (const part of query.split('&')) {
+    if (!part) continue;
+    const separator = part.indexOf('=');
+    const rawKey = separator === -1 ? part : part.slice(0, separator);
+    const rawValue = separator === -1 ? '' : part.slice(separator + 1);
+    try {
+      result[decodeURIComponent(rawKey)] = decodeURIComponent(rawValue);
+    } catch {
+      result[rawKey] = rawValue;
+    }
+  }
+
+  return result;
+}
+
+export function normalizeEndpoint(value: string): string {
+  let endpoint = value.trim();
+
+  if (/^https:\/\//i.test(endpoint)) {
+    endpoint = endpoint.replace(/^https:\/\//i, 'wss://');
+  } else if (/^http:\/\//i.test(endpoint)) {
+    endpoint = endpoint.replace(/^http:\/\//i, 'ws://');
+  }
+
+  if (!/^wss?:\/\//i.test(endpoint)) {
+    endpoint = `ws://${endpoint}`;
+  }
+
+  return endpoint.replace(/\/+$/, '');
+}
+
+/**
+ * Aceita o QR do OpenCode em vários formatos:
+ * - JSON: { type: "pairing", payload: {...} } ou { endpoint, publicKey, ... }
+ * - URL: opencode-remote://pair?endpoint=...&key=...
+ * - URL direta: ws://192.168.0.10:4096
+ * - host:porta
+ */
+export function parsePairingPayload(raw: string): PairingData | null {
+  const text = raw.trim();
+  if (!text) return null;
+
+  let candidate: any = null;
+
+  if (text.startsWith('{') || text.startsWith('[')) {
+    candidate = safeJson(text);
+  }
+
+  if (!candidate) {
+    const looksLikeUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(text);
+    if (looksLikeUrl) {
+      const params = parseQuery(text);
+      const endpoint = firstString(
+        params.endpoint,
+        params.url,
+        params.server,
+        params.host,
+        params.ws,
+        params.address
+      );
+      const key = firstString(
+        params.publicKey,
+        params.key,
+        params.token,
+        params.secret,
+        params.auth
+      );
+
+      if (endpoint || /^wss?:\/\//i.test(text)) {
+        candidate = {
+          endpoint: endpoint ?? text,
+          publicKey: key,
+          sessionId: params.sessionId ?? params.session,
+        };
+      }
+    }
+  }
+
+  if (!candidate) {
+    if (/^wss?:\/\//i.test(text)) {
+      candidate = { endpoint: text };
+    } else if (/^[\w.-]+:\d{2,5}$/.test(text)) {
+      candidate = { endpoint: text };
+    } else {
+      return null;
+    }
+  }
+
+  // Desembrulha formatos aninhados.
+  if (candidate?.type === 'pairing' && candidate.payload) {
+    candidate =
+      typeof candidate.payload === 'string'
+        ? safeJson(candidate.payload) ?? candidate
+        : candidate.payload;
+  }
+  if (candidate?.data && typeof candidate.data === 'object') {
+    candidate = candidate.data;
+  }
+  if (candidate?.payload && typeof candidate.payload === 'object') {
+    candidate = candidate.payload;
+  }
+
+  const endpoint = firstString(
+    candidate.endpoint,
+    candidate.url,
+    candidate.server,
+    candidate.host,
+    candidate.ws,
+    candidate.address
+  );
+
+  if (!endpoint) return null;
+
+  const publicKey =
+    firstString(
+      candidate.publicKey,
+      candidate.key,
+      candidate.token,
+      candidate.secret,
+      candidate.auth
+    ) ?? '';
+
+  const sessionId =
+    firstString(candidate.sessionId, candidate.session, candidate.id) ??
+    `session-${Date.now()}`;
+
+  const expiresAt =
+    typeof candidate.expiresAt === 'number'
+      ? candidate.expiresAt
+      : typeof candidate.expires_at === 'number'
+        ? candidate.expires_at
+        : Date.now() + 24 * 60 * 60 * 1000;
+
+  return {
+    endpoint: normalizeEndpoint(endpoint),
+    publicKey,
+    sessionId,
+    expiresAt,
+  };
+}

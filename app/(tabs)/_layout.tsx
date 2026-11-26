@@ -1,30 +1,36 @@
 import { Tabs } from 'expo-router';
+import { StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/useTheme';
-import { Terminal, Wifi, Settings } from 'lucide-react-native';
+import { Settings, Terminal, Wifi } from 'lucide-react-native';
 
 export default function TabsLayout() {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
+        tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.mutedForeground,
         tabBarStyle: {
           backgroundColor: colors.tabBarBackground,
           borderTopColor: colors.border,
-          borderTopWidth: 1,
-          height: 60,
-          paddingBottom: 0,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          height: 52 + insets.bottom,
+          paddingTop: 6,
+          paddingBottom: Math.max(insets.bottom, 4),
+          elevation: 0,
         },
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: '600',
-          marginTop: 2,
+          marginTop: 1,
         },
-        tabBarIconStyle: {
-          marginBottom: 2,
+        tabBarItemStyle: {
+          paddingVertical: 0,
         },
       }}
     >
@@ -33,7 +39,7 @@ export default function TabsLayout() {
         options={{
           title: 'Terminal',
           tabBarIcon: ({ focused, color }) => (
-            <Terminal size={24} color={color} strokeWidth={focused ? 2.5 : 2} />
+            <Terminal size={21} color={color} strokeWidth={focused ? 2.4 : 2} />
           ),
         }}
       />
@@ -42,7 +48,7 @@ export default function TabsLayout() {
         options={{
           title: 'Parear',
           tabBarIcon: ({ focused, color }) => (
-            <Wifi size={24} color={color} strokeWidth={focused ? 2.5 : 2} />
+            <Wifi size={21} color={color} strokeWidth={focused ? 2.4 : 2} />
           ),
         }}
       />
@@ -51,7 +57,7 @@ export default function TabsLayout() {
         options={{
           title: 'Ajustes',
           tabBarIcon: ({ focused, color }) => (
-            <Settings size={24} color={color} strokeWidth={focused ? 2.5 : 2} />
+            <Settings size={21} color={color} strokeWidth={focused ? 2.4 : 2} />
           ),
         }}
       />

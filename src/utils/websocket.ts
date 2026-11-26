@@ -1,119 +1,147 @@
 import { useAppStore } from '@/store';
-import { OpenCodeMessage, PairingData } from '@/types';
+import { PairingData } from '@/types';
 
 type MessageHandler = (message: any) => void;
+
+const CONNECT_TIMEOUT_MS = 8000;
+const MAX_RECONNECT_ATTEMPTS = 5;
 
 class OpenCodeWebSocket {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private messageHandlers: Set<MessageHandler> = new Set();
   private pairedSession: PairingData | null = null;
   private keepAliveInterval: ReturnType<typeof setInterval> | null = null;
 
   connect(pairingData: PairingData) {
+    this.closeSocket();
     this.pairedSession = pairingData;
-    this.reconnectAttempts = 0;
-    
+    useAppStore.getState().setConnectionStatus('connecting');
+
+    let socket: WebSocket;
     try {
-      this.ws = new WebSocket(pairingData.endpoint);
-      this.setupEventHandlers();
+      socket = new WebSocket(pairingData.endpoint);
     } catch (error) {
       console.error('WebSocket connection error:', error);
+      useAppStore.getState().setConnectionStatus('error');
       this.scheduleReconnect();
+      return;
     }
-  }
 
-  private setupEventHandlers() {
-    if (!this.ws) return;
+    this.ws = socket;
 
-    this.ws.onopen = () => {
-      console.log('WebSocket connected');
+    const timeout = setTimeout(() => {
+      if (this.ws !== socket || socket.readyState === WebSocket.OPEN) return;
+      useAppStore.getState().setConnectionStatus('error');
+      try {
+        socket.close();
+      } catch {
+        // ignore
+      }
+    }, CONNECT_TIMEOUT_MS);
+
+    socket.onopen = () => {
+      if (this.ws !== socket) return;
+      clearTimeout(timeout);
       this.reconnectAttempts = 0;
       useAppStore.getState().setConnectionStatus('connected');
-      
-      // Send authentication
+
       this.send({
         type: 'auth',
         sessionId: this.pairedSession?.sessionId,
         publicKey: this.pairedSession?.publicKey,
       });
 
-      // Start keep-alive
       this.startKeepAlive();
     };
 
-    this.ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (this.ws !== socket) return;
       try {
-        const message = JSON.parse(event.data);
-        this.handleMessage(message);
+        this.handleMessage(JSON.parse(event.data));
       } catch (error) {
         console.error('Failed to parse message:', error);
       }
     };
 
-    this.ws.onclose = (event) => {
-      console.log('WebSocket closed:', event.code, event.reason);
-      this.stopKeepAlive();
-      useAppStore.getState().setConnectionStatus('disconnected');
-      
-      if (event.code !== 1000) { // Not a clean close
-        this.scheduleReconnect();
-      }
+    socket.onerror = () => {
+      if (this.ws !== socket) return;
+      clearTimeout(timeout);
+      useAppStore.getState().setConnectionStatus('error');
     };
 
-    this.ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+    socket.onclose = (event) => {
+      if (this.ws !== socket) return;
+      clearTimeout(timeout);
+      this.stopKeepAlive();
+      this.ws = null;
+
+      if (event.code === 1000) {
+        useAppStore.getState().setConnectionStatus('disconnected');
+        return;
+      }
+
       useAppStore.getState().setConnectionStatus('error');
+      this.scheduleReconnect();
     };
   }
 
   private handleMessage(message: any) {
-    switch (message.type) {
+    switch (message?.type) {
       case 'session_list':
-        useAppStore.getState().setSessions(message.sessions);
+        if (Array.isArray(message.sessions)) {
+          useAppStore.getState().setSessions(message.sessions);
+        }
         break;
       case 'session_created':
-        useAppStore.getState().addSession(message.session);
-        useAppStore.getState().setActiveSession(message.session.id);
+        if (message.session) {
+          useAppStore.getState().addSession(message.session);
+          useAppStore.getState().setActiveSession(message.session.id);
+        }
         break;
       case 'message':
-        useAppStore.getState().addMessage(message.sessionId, message.data);
+        if (message.sessionId && message.data) {
+          useAppStore.getState().addMessage(message.sessionId, message.data);
+        }
         break;
       case 'terminal_output':
-        useAppStore.getState().addTerminalOutput(message.data);
+        if (message.data) {
+          useAppStore.getState().addTerminalOutput(message.data);
+        }
         break;
       case 'file_tree':
-        useAppStore.getState().setFileTree(message.data);
+        if (Array.isArray(message.data)) {
+          useAppStore.getState().setFileTree(message.data);
+        }
         break;
       case 'error':
         console.error('Server error:', message.data);
         break;
       case 'pong':
-        // Keep-alive response
         break;
       default:
-        console.log('Unknown message type:', message.type);
+        break;
     }
 
-    // Notify all handlers
-    this.messageHandlers.forEach(handler => handler(message));
+    this.messageHandlers.forEach((handler) => handler(message));
   }
 
   private scheduleReconnect() {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log('Max reconnect attempts reached');
+    if (!this.pairedSession) return;
+
+    if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      useAppStore.getState().setConnectionStatus('error');
       return;
     }
 
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
-    this.reconnectAttempts++;
-    
-    console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
-    useAppStore.getState().setConnectionStatus('reconnecting');
-    
-    setTimeout(() => {
+    this.reconnectAttempts += 1;
+
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       if (this.pairedSession) {
         this.connect(this.pairedSession);
       }
@@ -121,6 +149,7 @@ class OpenCodeWebSocket {
   }
 
   private startKeepAlive() {
+    this.stopKeepAlive();
     this.keepAliveInterval = setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN) {
         this.send({ type: 'ping' });
@@ -171,12 +200,38 @@ class OpenCodeWebSocket {
 
   disconnect() {
     this.stopKeepAlive();
-    if (this.ws) {
-      this.ws.close(1000, 'Client disconnect');
-      this.ws = null;
-    }
     this.pairedSession = null;
     this.reconnectAttempts = 0;
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    const socket = this.ws;
+    this.ws = null;
+
+    if (socket) {
+      try {
+        socket.close(1000, 'Client disconnect');
+      } catch {
+        // ignore
+      }
+    }
+
+    useAppStore.getState().setConnectionStatus('disconnected');
+  }
+
+  private closeSocket() {
+    const socket = this.ws;
+    this.ws = null;
+    if (socket) {
+      try {
+        socket.close(1000, 'Reconnecting');
+      } catch {
+        // ignore
+      }
+    }
   }
 
   get readyState() {

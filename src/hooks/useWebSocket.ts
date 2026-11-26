@@ -1,25 +1,20 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useAppStore } from '@/store';
 import { websocket } from '@/utils/websocket';
 
 export function useWebSocket() {
-  const { pairedSession, connectionStatus, setConnectionStatus } = useAppStore();
-  const initialized = useRef(false);
+  const pairedSession = useAppStore((state) => state.pairedSession);
+  const connectionStatus = useAppStore((state) => state.connectionStatus);
 
   useEffect(() => {
-    if (pairedSession && connectionStatus !== 'connected' && connectionStatus !== 'connecting' && !initialized.current) {
-      initialized.current = true;
-      websocket.connect(pairedSession);
-    }
-
     if (!pairedSession) {
       websocket.disconnect();
-      initialized.current = false;
+      return;
     }
 
-    return () => {
-      // Don't disconnect on unmount - keep connection alive
-    };
+    if (connectionStatus === 'disconnected') {
+      websocket.connect(pairedSession);
+    }
   }, [pairedSession, connectionStatus]);
 
   const sendCommand = (command: string) => {
@@ -39,4 +34,10 @@ export function useWebSocket() {
     isConnected: connectionStatus === 'connected',
     connectionStatus,
   };
+}
+
+/** Mantém o WebSocket vivo durante todo o ciclo de vida do app. */
+export function ConnectionManager() {
+  useWebSocket();
+  return null;
 }

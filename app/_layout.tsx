@@ -1,15 +1,28 @@
 import { Stack } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { Providers } from '@/components/Providers';
+import { useTheme } from '@/hooks/useTheme';
 
-export default function RootLayout() {
+function RootNavigator() {
+  const { isDark } = useTheme();
+
   return (
-    <Providers>
+    <>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
           headerShown: false,
           animation: 'fade',
         }}
       />
+    </>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <Providers>
+      <RootNavigator />
     </Providers>
   );
 }
