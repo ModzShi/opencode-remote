@@ -18,9 +18,9 @@
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "OpenCode Remote precisa acessar a rede local para conectar ao seu PC",
         "NSBonjourServices": ["_opencode._tcp"],
-        "ITSAppUsesNonExemptEncryption": false
-      },
-      "associatedDomains": ["applinks:opencode.local"]
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "OpenCode Remote usa a câmera para escanear o QR Code de pareamento do OpenCode"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -36,10 +36,16 @@
       "expo-router",
       "expo-secure-store",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "OpenCode Remote usa a câmera para escanear o QR Code de pareamento do OpenCode."
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "ios": {
-            "deploymentTarget": "16.0"
+            "deploymentTarget": "16.4"
           }
         }
       ]
@@ -51,17 +57,7 @@
     "extra": {
       "router": {
         "origin": false
-      },
-      "eas": {
-        "projectId": "your-project-id"
       }
-    },
-    "owner": "nazax44",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/your-project-id"
     }
   }
 }

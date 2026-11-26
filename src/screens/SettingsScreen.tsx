@@ -5,8 +5,6 @@ import { useAppStore } from '@/store';
 import { Button, Card, Input } from '@/components/ui';
 import { Palette, Bell, Smartphone, HardDrive, Trash2, Info, Github, Share2, Moon, Sun, Monitor } from 'lucide-react-native';
 import { Linking, Clipboard, Platform } from 'react-native';
-import * as Application from 'expo-application';
-import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 
 export default function SettingsScreen() {
@@ -47,10 +45,8 @@ export default function SettingsScreen() {
       appVersion: Constants.expoConfig?.version || '1.0.0',
       buildNumber: Constants.expoConfig?.ios?.buildNumber || '1',
       platform: Platform.OS,
-      deviceName: Device.deviceName,
-      deviceModel: Device.modelName,
-      osVersion: Device.osVersion,
-      isDevice: Device.isDevice,
+      deviceName: Constants.deviceName ?? 'unknown',
+      osVersion: Platform.Version,
       theme: settings.theme,
       paired: !!pairedSession,
       sessionsCount: sessions.length,
