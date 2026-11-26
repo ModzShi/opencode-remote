@@ -68,40 +68,48 @@ export function parsePairingPayload(raw: string): PairingData | null {
 
   let candidate: any = null;
 
+  // 1) JSON direto
   if (text.startsWith('{') || text.startsWith('[')) {
     candidate = safeJson(text);
   }
 
+  // 2) URL (https://, wss://, opencode-remote://, etc.)
   if (!candidate) {
     const looksLikeUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(text);
     if (looksLikeUrl) {
-      const params = parseQuery(text);
-      const endpoint = firstString(
-        params.endpoint,
-        params.url,
-        params.server,
-        params.host,
-        params.ws,
-        params.address
-      );
-      const key = firstString(
-        params.publicKey,
-        params.key,
-        params.token,
-        params.secret,
-        params.auth
-      );
-
-      if (endpoint || /^wss?:\/\//i.test(text)) {
-        candidate = {
-          endpoint: endpoint ?? text,
-          publicKey: key,
-          sessionId: params.sessionId ?? params.session,
-        };
+      const parsed = parseUrlWithPathToken(text);
+      if (parsed) {
+        candidate = parsed;
+      } else {
+        // Fallback: query params
+        const params = parseQuery(text);
+        const endpoint = firstString(
+          params.endpoint,
+          params.url,
+          params.server,
+          params.host,
+          params.ws,
+          params.address
+        );
+        const key = firstString(
+          params.publicKey,
+          params.key,
+          params.token,
+          params.secret,
+          params.auth
+        );
+        if (endpoint || /^wss?:\/\//i.test(text)) {
+          candidate = {
+            endpoint: endpoint ?? text,
+            publicKey: key,
+            sessionId: params.sessionId ?? params.session,
+          };
+        }
       }
     }
   }
 
+  // 3) Host:port ou ws(s):// simples
   if (!candidate) {
     if (/^wss?:\/\//i.test(text)) {
       candidate = { endpoint: text };
@@ -163,4 +171,38 @@ export function parsePairingPayload(raw: string): PairingData | null {
     sessionId,
     expiresAt,
   };
+}
+
+/**
+ * Extrai endpoint + token de URLs no formato do app OpenCode:
+ * https://host/auth/connect/TOKEN
+ * https://host/pair/TOKEN
+ * wss://host/connect/TOKEN
+ * opencode-remote://pair?endpoint=...&key=...
+ */
+function parseUrlWithPathToken(text: string): { endpoint: string; publicKey: string; sessionId?: string } | null {
+  try {
+    const url = new URL(text);
+    const hostname = url.hostname;
+    const protocol = url.protocol === 'https:' ? 'wss:' : url.protocol === 'http:' ? 'ws:' : url.protocol;
+    const port = url.port ? `:${url.port}` : '';
+    const baseEndpoint = `${protocol}//${hostname}${port}`;
+
+    // Path tokens: /auth/connect/TOKEN, /pair/TOKEN, /connect/TOKEN, /auth/TOKEN
+    const pathParts = url.pathname.split('/').filter(Boolean);
+    const tokenCandidates = pathParts.filter(p => p.length >= 20 && /^[A-Za-z0-9_-]+$/.test(p));
+    const token = tokenCandidates[tokenCandidates.length - 1];
+
+    if (!token) return null;
+
+    // Query params podem sobrescrever
+    const params = parseQuery(text);
+    const endpoint = firstString(params.endpoint, params.url, params.server, params.host, params.ws, params.address) ?? baseEndpoint;
+    const key = firstString(params.publicKey, params.key, params.token, params.secret, params.auth) ?? token;
+    const sessionId = firstString(params.sessionId, params.session);
+
+    return { endpoint, publicKey: key, sessionId };
+  } catch {
+    return null;
+  }
 }

@@ -23,6 +23,7 @@ import { PairingData } from '@/types';
 import {
   Camera,
   Check,
+  Clipboard as ClipboardIcon,
   Copy,
   QrCode,
   Settings as SettingsIcon,
@@ -113,6 +114,68 @@ export default function PairingScreen() {
       if (settings.hapticsEnabled) Vibration.vibrate(20);
     } catch {
       // Clipboard indisponível: ignora silenciosamente.
+    }
+  };
+
+  const pasteIntoUrl = async () => {
+    try {
+      const text = await Clipboard.getString();
+      if (text) {
+        const parsed = parsePairingPayload(text);
+        if (parsed) {
+          setManualUrl(parsed.endpoint);
+          if (parsed.publicKey) setManualToken(parsed.publicKey);
+          if (settings.hapticsEnabled) Vibration.vibrate(20);
+          return;
+        }
+        // Se não parseou como pareamento, tenta extrair URL
+        const urlMatch = text.match(/wss?:\/\/[^\s]+/);
+        if (urlMatch) {
+          setManualUrl(urlMatch[0]);
+          if (settings.hapticsEnabled) Vibration.vibrate(20);
+        }
+      }
+    } catch {
+      // Clipboard indisponível
+    }
+  };
+
+  const pasteIntoToken = async () => {
+    try {
+      const text = await Clipboard.getString();
+      if (text) {
+        const parsed = parsePairingPayload(text);
+        if (parsed?.publicKey) {
+          setManualToken(parsed.publicKey);
+          if (settings.hapticsEnabled) Vibration.vibrate(20);
+        } else if (text.length >= 20) {
+          // Assume que é o token direto
+          setManualToken(text.trim());
+          if (settings.hapticsEnabled) Vibration.vibrate(20);
+        }
+      }
+    } catch {
+      // Clipboard indisponível
+    }
+  };
+
+  const pasteFullPairing = async () => {
+    try {
+      const text = await Clipboard.getString();
+      if (!text) return;
+
+      const parsed = parsePairingPayload(text);
+      if (parsed) {
+        applyPairing(parsed);
+        return;
+      }
+
+      Alert.alert(
+        'Formato não reconhecido',
+        'Copie o JSON do pareamento, a URL completa ou o token.'
+      );
+    } catch {
+      // Clipboard indisponível
     }
   };
 
@@ -246,26 +309,57 @@ export default function PairingScreen() {
               Use os dados de <Text style={styles.inlineMono}>opencode pair --show-key</Text>.
             </Text>
 
-            <Input
-              label="Endereço do PC"
-              placeholder="ws://192.168.0.10:4096"
-              value={manualUrl}
-              onChangeText={setManualUrl}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              containerStyle={styles.field}
-            />
+            <View style={styles.fieldRow}>
+              <Input
+                label="Endereço do PC"
+                placeholder="ws://192.168.0.10:4096"
+                value={manualUrl}
+                onChangeText={setManualUrl}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+              />
+              <Pressable
+                onPress={pasteIntoUrl}
+                style={[styles.pasteButton, { backgroundColor: colors.muted }]}
+                hitSlop={8}
+                accessibilityLabel="Colar endereço da área de transferência"
+              >
+                <ClipboardIcon size={16} color={colors.mutedForeground} />
+              </Pressable>
+            </View>
 
-            <Input
-              label="Token de pareamento"
-              placeholder="Cole a chave gerada pelo OpenCode"
-              value={manualToken}
-              onChangeText={setManualToken}
-              autoCapitalize="none"
-              autoCorrect={false}
-              containerStyle={styles.field}
-            />
+            <View style={styles.fieldRow}>
+              <Input
+                label="Token de pareamento"
+                placeholder="Cole a chave gerada pelo OpenCode"
+                value={manualToken}
+                onChangeText={setManualToken}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <Pressable
+                onPress={pasteIntoToken}
+                style={[styles.pasteButton, { backgroundColor: colors.muted }]}
+                hitSlop={8}
+                accessibilityLabel="Colar token da área de transferência"
+              >
+                <ClipboardIcon size={16} color={colors.mutedForeground} />
+              </Pressable>
+            </View>
+
+            <Pressable
+              onPress={pasteFullPairing}
+              style={[
+                styles.pasteFull,
+                { backgroundColor: colors.muted, borderColor: colors.border },
+              ]}
+            >
+              <ClipboardIcon size={15} color={colors.mutedForeground} />
+              <Text style={[styles.pasteFullText, { color: colors.mutedForeground }]}>
+                Colar pareamento completo (JSON ou URL)
+              </Text>
+            </Pressable>
 
             <Button size="lg" fullWidth onPress={handleManualPair}>
               Conectar
@@ -485,5 +579,31 @@ const styles = StyleSheet.create({
   disconnect: {
     marginTop: 8,
     alignSelf: 'flex-start',
+  },
+  fieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  pasteButton: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pasteFull: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.sm,
+    paddingVertical: 10,
+    marginTop: 8,
+  },
+  pasteFullText: {
+    fontSize: 12.5,
+    fontWeight: '500',
   },
 });
