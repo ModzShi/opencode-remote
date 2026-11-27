@@ -19,7 +19,7 @@ import { ArrowUp, X } from 'lucide-react-native';
 import { useAppStore } from '@/store';
 import { websocket } from '@/utils/websocket';
 import { haptic } from '@/utils/haptics';
-import { VoiceOrb, OrbState } from '@/rafael/VoiceOrb';
+import { ParticleOrb, OrbState } from '@/rafael/ParticleOrb';
 
 const EXIT_WORDS = ['sair do modo rafael', 'sair do modo', 'desligar rafael', 'fechar rafael'];
 
@@ -79,13 +79,16 @@ export function RafaelScreen() {
     return undefined;
   }, [messages]);
 
-  const orbState: OrbState = writing || sending
-    ? 'listening'
-    : running
-      ? lastAssistant?.streaming
-        ? 'speaking'
-        : 'thinking'
-      : 'idle';
+  const orbState: OrbState =
+    connectionStatus !== 'connected'
+      ? 'connecting'
+      : writing || sending
+        ? 'listening'
+        : running
+          ? lastAssistant?.streaming
+            ? 'speaking'
+            : 'thinking'
+          : 'idle';
 
   const subtitle = useMemo(() => {
     const spoken = (writing || sending) && draft.trim().length > 0 ? draft : null;
@@ -227,7 +230,7 @@ export function RafaelScreen() {
       >
         <View style={styles.orbArea} {...panResponder.panHandlers}>
           <Animated.View style={{ transform: [{ scale }] }}>
-            <VoiceOrb size={orbSize} state={orbState} />
+            <ParticleOrb size={orbSize} state={orbState} />
           </Animated.View>
         </View>
 
