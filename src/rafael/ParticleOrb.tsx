@@ -13,12 +13,13 @@ interface ParticleOrbProps {
   levelRef?: { current: number };
 }
 
-const COUNT = 560;
+const COUNT = 460;
 const TWO_PI = Math.PI * 2;
 const GOLDEN = Math.PI * (3 - Math.sqrt(5));
 const TONES = 6;
 const ALPHAS = 2;
 const BUCKETS = TONES * ALPHAS;
+const FRAME_MS = 33; // 30 fps: movimento lento e constante, metade do custo
 
 type Params = {
   breathe: number;
@@ -32,14 +33,17 @@ type Params = {
   alpha: number;
 };
 
-// Sem giro e sem rotação: o orbe fica estático, só vibra com a voz.
+/*
+ * Sem giro e sem zoom: o orbe fica parado no lugar. 'pensando' usa a mesma
+ * animação de 'conectando' (anel) e 'ouvindo' usa a de 'falando' (vibração forte).
+ */
 const STATES: Record<OrbState, Params> = {
-  idle: { breathe: 0.05, drift: 1, ripple: 0, swell: 0.04, pulse: 0, ring: 0, jitter: 0, shake: 0, alpha: 0.72 },
-  connecting: { breathe: 0.02, drift: 0.2, ripple: 0, swell: 0, pulse: 0.06, ring: 1, jitter: 0, shake: 0, alpha: 0.8 },
-  listening: { breathe: 0.012, drift: 0, ripple: 1, swell: 0.12, pulse: 0, ring: 0, jitter: 0, shake: 0, alpha: 0.92 },
-  thinking: { breathe: 0.01, drift: 0, ripple: 0, swell: 0, pulse: 1, ring: 0, jitter: 0, shake: 0, alpha: 0.78 },
-  speaking: { breathe: 0.01, drift: 0, ripple: 0, swell: 0.06, pulse: 0, ring: 0, jitter: 0.6, shake: 0, alpha: 0.94 },
-  error: { breathe: 0, drift: 0, ripple: 0, swell: 0, pulse: 0, ring: 0, jitter: 0.7, shake: 1, alpha: 0.85 },
+  idle: { breathe: 0.07, drift: 1, ripple: 0, swell: 0.05, pulse: 0, ring: 0, jitter: 0, shake: 0, alpha: 0.74 },
+  connecting: { breathe: 0.03, drift: 0.3, ripple: 0, swell: 0.02, pulse: 0.08, ring: 1, jitter: 0, shake: 0, alpha: 0.82 },
+  listening: { breathe: 0.02, drift: 0, ripple: 1, swell: 0.3, pulse: 0, ring: 0, jitter: 0.7, shake: 0, alpha: 0.94 },
+  thinking: { breathe: 0.03, drift: 0.3, ripple: 0, swell: 0.02, pulse: 0.08, ring: 1, jitter: 0, shake: 0, alpha: 0.82 },
+  speaking: { breathe: 0.02, drift: 0, ripple: 0.35, swell: 0.28, pulse: 0, ring: 0, jitter: 0.45, shake: 0, alpha: 0.94 },
+  error: { breathe: 0, drift: 0, ripple: 0, swell: 0, pulse: 0, ring: 0, jitter: 0.5, shake: 1, alpha: 0.86 },
   disabled: { breathe: 0, drift: 0, ripple: 0, swell: 0, pulse: 0, ring: 0, jitter: 0, shake: 0, alpha: 0.45 },
 };
 
@@ -116,11 +120,11 @@ function ParticleOrbInner({ size, state, levelRef }: ParticleOrbProps) {
 
     let frameId = 0;
     let running = true;
+    let lastDraw = 0;
     const started = Date.now();
     let last = started;
     let colourClock = 0;
-    let frameMs = 16;
-    let skip = 0;
+    let smoothedLevel = 0;
     const colours = tonePalette(paletteRef.current);
 
     const counts = new Uint16Array(BUCKETS);
@@ -131,21 +135,17 @@ function ParticleOrbInner({ size, state, levelRef }: ParticleOrbProps) {
       frameId = requestAnimationFrame(loop);
 
       const now = Date.now();
-      const dt = Math.min(0.05, (now - last) / 1000);
+      if (now - lastDraw < FRAME_MS) return;
+      const dt = Math.min(0.12, (now - last) / 1000);
       last = now;
+      lastDraw = now;
       if (dt <= 0) return;
       const time = (now - started) / 1000;
 
-      frameMs = frameMs * 0.85 + dt * 1000 * 0.15;
-      // Em aparelhos que seguem o passo, desenha um frame sim, outro não.
-      const stride = frameMs > 30 ? 3 : frameMs > 20 ? 2 : 1;
-      skip += 1;
-      if (stride > 1 && skip % stride !== 0) return;
-
       STATE_NAMES.forEach((name) => {
         const want = name === stateRef.current ? 1 : 0;
-        const rate = name === 'idle' || name === 'disabled' ? 5 : name === 'error' ? 10 : 14;
-        weights.current[name] = approach(weights.current[name] ?? 0, want, rate, dt * stride);
+        const rate = name === 'idle' || name === 'disabled' ? 3 : name === 'error' ? 6 : 7;
+        weights.current[name] = approach(weights.current[name] ?? 0, want, rate, dt);
       });
 
       for (let index = 0; index < KEYS.length; index += 1) {
@@ -155,14 +155,15 @@ function ParticleOrbInner({ size, state, levelRef }: ParticleOrbProps) {
           const name = STATE_NAMES[stateIndex];
           target += (weights.current[name] ?? 0) * STATES[name][key];
         }
-        current.current[key] = approach(current.current[key], target, 12, dt * stride);
+        current.current[key] = approach(current.current[key], target, 5, dt);
       }
 
+      smoothedLevel = approach(smoothedLevel, levelRef?.current ?? 0, 6, dt);
       const params = current.current;
-      const amplitude = clamp01(Math.max(levelRef?.current ?? 0, tickSignal(dt * stride) * 0.9));
-      const breathe = 1 + params.breathe * Math.sin(time * 1.6);
-      const shakeX = params.shake * Math.sin(time * 47) * 2;
-      const shakeY = params.shake * Math.cos(time * 39) * 2;
+      const amplitude = clamp01(Math.max(smoothedLevel, tickSignal(dt) * 0.75));
+      const breathe = 1 + params.breathe * Math.sin(time * 1.1);
+      const shakeX = params.shake * Math.sin(time * 30) * 2;
+      const shakeY = params.shake * Math.cos(time * 26) * 2;
       const baseScale = 62 * breathe;
 
       counts.fill(0);
@@ -180,27 +181,27 @@ function ParticleOrbInner({ size, state, levelRef }: ParticleOrbProps) {
           const ringW = params.ring * 0.9;
           px += (Math.cos(angle) * 1.02 - px) * ringW;
           py += (Math.sin(angle) * 1.02 - py) * ringW;
-          pz += (Math.sin(angle * 2 + time * 1.4) * 0.18 - pz) * ringW;
+          pz += (Math.sin(angle * 2 + time * 0.9) * 0.18 - pz) * ringW;
         }
 
         const perspective = 1 / (1.75 - pz * 0.45);
         const ripple =
-          params.ripple * (0.2 + amplitude * 0.8) * Math.sin(seed * 3 + time * 6.5) +
-          params.pulse * 0.13 * Math.sin(time * 2.6 + seed * 0.4);
-        const drift = params.drift * 0.02 * Math.sin(time * 0.4 + seed * 2);
-        const jitter = params.jitter * 0.035 * Math.sin(seed * 97 + time * 31);
-        const radial = 1 + ripple * 0.45 + params.swell * 0.28 * Math.sin(time * 1.7 + seed) + jitter;
+          params.ripple * (0.25 + amplitude * 0.75) * Math.sin(seed * 3 + time * 2.4) +
+          params.pulse * 0.1 * Math.sin(time * 1.5 + seed * 0.4);
+        const drift = params.drift * 0.03 * Math.sin(time * 0.3 + seed * 2);
+        const jitter = params.jitter * 0.05 * Math.sin(seed * 97 + time * 9);
+        const radial =
+          1 + ripple * 0.6 + params.swell * 0.5 * Math.sin(time * 0.8 + seed) + jitter;
 
         const screenX = 100 + (px + drift) * baseScale * radial * perspective + shakeX;
         const screenY = 100 + (py + drift) * baseScale * radial * perspective + shakeY;
 
         const depth = (pz + 1) / 2;
-        const dot = (0.7 + depth * 1.55) * (0.8 + amplitude * params.ripple * 1.1);
+        const dot = (0.7 + depth * 1.55) * (0.85 + amplitude * params.ripple * 0.9);
         const alpha = clamp01(params.alpha * (0.2 + depth * 0.9) * (0.5 + tones[index] * 0.5));
         const bucket = toneBucket[index] * ALPHAS + (alpha > 0.55 ? 1 : 0);
         counts[bucket] += 1;
 
-        // Coordenadas em meio pixel: barato de formatar e sem tremor visível.
         const xi = Math.round(screenX * 2) / 2;
         const yi = Math.round(screenY * 2) / 2;
         const ri = Math.round(dot * 2) / 2;
@@ -210,8 +211,8 @@ function ParticleOrbInner({ size, state, levelRef }: ParticleOrbProps) {
           'M' + (xi - ri) + ' ' + yi + 'a' + ri + ' ' + ri + ' 0 1 0 ' + d2 + ' 0a' + ri + ' ' + ri + ' 0 1 0 ' + (-d2) + ' 0';
       }
 
-      colourClock += dt * stride;
-      const colourChanged = colourClock > 0.3;
+      colourClock += dt;
+      const colourChanged = colourClock > 0.35;
       if (colourChanged) {
         colourClock = 0;
         paletteRef.current = paletteAt(time);
@@ -236,6 +237,7 @@ function ParticleOrbInner({ size, state, levelRef }: ParticleOrbProps) {
         if (!running) {
           running = true;
           last = Date.now();
+          lastDraw = 0;
           frameId = requestAnimationFrame(loop);
         }
       } else {
@@ -263,7 +265,7 @@ function ParticleOrbInner({ size, state, levelRef }: ParticleOrbProps) {
             }}
             d="M0 0"
             fill={mixHex(initialPalette.core, initialPalette.glow, (bucket >> 1) / (TONES - 1))}
-            fillOpacity={bucket % ALPHAS === 0 ? 0.42 : 0.82}
+            fillOpacity={bucket % ALPHAS === 0 ? 0.44 : 0.84}
           />
         ))}
       </Svg>

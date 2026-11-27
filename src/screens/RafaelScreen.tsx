@@ -59,6 +59,8 @@ export function RafaelScreen() {
   const [draft, setDraft] = useState('');
   const [writing, setWriting] = useState(false);
   const [sending, setSending] = useState(false);
+  // O microfone só liga depois que o teclado terminou de abrir; ativar antes trava a tela.
+  const [micReady, setMicReady] = useState(false);
 
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const micLevel = useRef(0);
@@ -137,13 +139,23 @@ export function RafaelScreen() {
     haptic('light');
     stopSpeaking();
     setWriting(true);
-    setTimeout(() => inputRef.current?.focus(), 60);
   }, []);
+
+  const closeInput = useCallback(() => {
+    setWriting(false);
+    setMicReady(false);
+  }, []);
+
+  useEffect(() => {
+    if (!writing) return;
+    const id = setTimeout(() => setMicReady(true), 700);
+    return () => clearTimeout(id);
+  }, [writing]);
 
   const submit = useCallback(async () => {
     const text = draft.trim();
     if (!text) {
-      setWriting(false);
+      closeInput();
       Keyboard.dismiss();
       return;
     }
@@ -151,7 +163,7 @@ export function RafaelScreen() {
     const normalized = normalize(text);
     if (EXIT_WORDS.some((word) => normalized.includes(word))) {
       setDraft('');
-      setWriting(false);
+      closeInput();
       Keyboard.dismiss();
       close();
       return;
@@ -172,9 +184,9 @@ export function RafaelScreen() {
       setDraft(text);
       return;
     }
-    setWriting(false);
+    closeInput();
     Keyboard.dismiss();
-  }, [activeSessionId, close, draft]);
+  }, [activeSessionId, close, closeInput, draft]);
 
   const handleLevel = useCallback((value: number) => {
     micLevel.current = value;
@@ -197,7 +209,7 @@ export function RafaelScreen() {
       <StatusBar style="light" />
       {MicBridge ? (
         <MicBridge
-          enabled={writing}
+          enabled={micReady}
           onLevel={handleLevel}
         />
       ) : null}
@@ -213,10 +225,7 @@ export function RafaelScreen() {
         </Pressable>
       </View>
 
-      <KeyboardAvoidingView
-        style={styles.body}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <View style={styles.body}>
         <Pressable style={styles.orbArea} onPress={openInput}>
           <ParticleOrb size={orbSize} state={orbState} levelRef={micLevel} />
         </Pressable>
@@ -225,21 +234,19 @@ export function RafaelScreen() {
           <Text numberOfLines={5} style={styles.caption}>
             {shownSubtitle}
           </Text>
-          {!writing ? (
-            <Text style={styles.hint}>
-              toque para falar
-            </Text>
-          ) : null}
+          {!writing ? <Text style={styles.hint}>toque para falar</Text> : null}
         </View>
 
         {writing ? (
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={[styles.composer, { marginBottom: Math.max(insets.bottom, 14) }]}>
             <TextInput
               ref={inputRef}
               value={draft}
               onChangeText={setDraft}
               onSubmitEditing={submit}
-              onBlur={() => setWriting(false)}
+              onBlur={closeInput}
+              autoFocus
               placeholder="fale com o Rafael"
               placeholderTextColor="#4a4a4a"
               style={styles.input}
@@ -251,12 +258,13 @@ export function RafaelScreen() {
               <ArrowUp size={18} color="#000" strokeWidth={3} />
             </Pressable>
           </View>
+          </KeyboardAvoidingView>
         ) : (
           <Text style={[styles.footer, { marginBottom: Math.max(insets.bottom, 14) }]}>
             diga “sair do modo rafael” para voltar ao chat
           </Text>
         )}
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }
