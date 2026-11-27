@@ -161,39 +161,54 @@ class OpenCodeSSE {
   }
 
   private handleMessage(message: any) {
+    // Map real opencode SSE event types -> app state
     switch (message?.type) {
-      case 'session_list':
-        if (Array.isArray(message.sessions)) {
-          useAppStore.getState().setSessions(message.sessions);
+      case 'server.connected':
+        break;
+
+      case 'session.created':
+        if (message.data) {
+          useAppStore.getState().addSession(message.data);
         }
         break;
-      case 'session_created':
-        if (message.session) {
-          useAppStore.getState().addSession(message.session);
-          useAppStore.getState().setActiveSession(message.session.id);
+
+      case 'session.updated':
+      case 'session.renamed':
+      case 'session.archived':
+        if (message.data?.session) {
+          useAppStore.getState().addSession(message.data.session);
         }
         break;
-      case 'message':
-        if (message.sessionId && message.data) {
-          useAppStore.getState().addMessage(message.sessionId, message.data);
+
+      case 'session.deleted':
+        if (message.data?.sessionID) {
+          useAppStore.getState().removeSession?.(message.data.sessionID);
         }
         break;
-      case 'terminal_output':
+
+      case 'session.message.content.updated':
+        if (message.data?.sessionID) {
+          useAppStore.getState().addMessage(message.data.sessionID, message.data);
+        }
+        break;
+
+      case 'session.execution.succeeded':
+      case 'session.execution.failed':
+        if (message.type === 'session.execution.failed') {
+          console.error('Execution failed:', message.data);
+        }
+        break;
+
+      case 'session.tool.success':
         if (message.data) {
           useAppStore.getState().addTerminalOutput(message.data);
         }
         break;
-      case 'file_tree':
-        if (Array.isArray(message.data)) {
-          useAppStore.getState().setFileTree(message.data);
-        }
+
+      case 'session.tool.failed':
+        console.error('Tool failed:', message.data);
         break;
-      case 'error':
-        console.error('Server error:', message.data);
-        break;
-      case 'server.connected':
-        // Connected event from opencode
-        break;
+
       default:
         break;
     }
