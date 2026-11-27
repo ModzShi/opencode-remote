@@ -54,3 +54,7 @@ credentials.json
 
 # TypeScript
 *.tsbuildinfo
+# Prebuild nativo (gerado no CI)
+/ios
+/android
+

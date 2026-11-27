@@ -12,9 +12,12 @@
       "buildNumber": "2",
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "OpenCode Remote precisa acessar a rede local para conectar ao seu PC",
-        "NSBonjourServices": ["_opencode._tcp"],
+        "NSBonjourServices": [
+          "_opencode._tcp"
+        ],
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "OpenCode Remote usa a câmera para escanear o QR Code de pareamento do OpenCode"
+        "NSCameraUsageDescription": "OpenCode Remote usa a câmera para escanear o QR Code de pareamento do OpenCode",
+        "NSMicrophoneUsageDescription": "OpenCode Remote usa o microfone para o Rafael ouvir sua voz"
       }
     },
     "android": {
@@ -42,7 +45,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#0a0a0f"
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "cli": {
       "appVersionSource": "local"

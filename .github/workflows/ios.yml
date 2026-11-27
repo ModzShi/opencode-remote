@@ -1,0 +1,106 @@
+name: iOS IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Generate iOS project
+        run: npx expo prebuild --platform ios --clean --no-install
+
+      - name: CocoaPods
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: Build (unsigned)
+        run: |
+          set -euo pipefail
+          WORKSPACE=$(ls -d ios/*.xcworkspace | head -1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "workspace=$WORKSPACE scheme=$SCHEME"
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            ENABLE_BITCODE=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            | tee build.log | tail -40
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          APP=$(ls -d build/ios/Build/Products/Release-iphoneos/*.app | head -1)
+          echo "app=$APP"
+          rm -rf Payload OpenCodeRemote-unsigned.ipa
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry OpenCodeRemote-unsigned.ipa Payload
+          ls -lh OpenCodeRemote-unsigned.ipa
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist"
+          test -f "$APP/main.jsbundle" && echo 'bundle presente' || (echo 'bundle ausente' && exit 1)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: OpenCodeRemote-unsigned.ipa
+          retention-days: 14
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: |
+            build.log
+            ios/Podfile.lock
+
+      - name: Publish release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ios-${{ github.run_number }}
+          name: iOS build ${{ github.run_number }}
+          body: |
+            Build automático (sem assinatura). Instale com SideStore/AltStore/E-Sign.
+            Commit: ${{ github.sha }}
+          files: OpenCodeRemote-unsigned.ipa
+          make_latest: true
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "### IPA pronto" >> $GITHUB_STEP_SUMMARY
+          echo "https://github.com/${{ github.repository }}/releases/download/ios-${{ github.run_number }}/OpenCodeRemote-unsigned.ipa" >> $GITHUB_STEP_SUMMARY

@@ -9,7 +9,8 @@ export type OrbState = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speak
 interface ParticleOrbProps {
   size: number;
   state: OrbState;
-  level?: number;
+  /** Nível 0..1 vindo do microfone (opcional). */
+  levelRef?: { current: number };
 }
 
 const COUNT = 620;
@@ -96,10 +97,9 @@ function tonePalette(palette: Palette): string[] {
   );
 }
 
-export function ParticleOrb({ size, state, level = 0 }: ParticleOrbProps) {
+export function ParticleOrb({ size, state, levelRef }: ParticleOrbProps) {
   const paths = useRef<(React.ElementRef<typeof Path> | null)[]>([]);
   const stateRef = useRef<OrbState>(state);
-  const levelRef = useRef(level);
   const weights = useRef<Record<string, number>>({});
   const current = useRef<Params>({ ...STATES.idle });
   const paletteRef = useRef(paletteAt(0));
@@ -108,10 +108,6 @@ export function ParticleOrb({ size, state, level = 0 }: ParticleOrbProps) {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
-
-  useEffect(() => {
-    levelRef.current = level;
-  }, [level]);
 
   useEffect(() => {
     const initial: Record<string, number> = {};
@@ -158,7 +154,7 @@ export function ParticleOrb({ size, state, level = 0 }: ParticleOrbProps) {
       const sinSpin = Math.sin(spinAngle);
       const cosSpin = Math.cos(spinAngle);
 
-      const amplitude = clamp01(Math.max(levelRef.current, tickSignal(dt) * 0.9));
+      const amplitude = clamp01(Math.max(levelRef?.current ?? 0, tickSignal(dt) * 0.9));
       const breathe = 1 + params.breathe * Math.sin(time * 1.6);
       const shakeX = params.shake * Math.sin(time * 47) * 2;
       const shakeY = params.shake * Math.cos(time * 39) * 2;
@@ -259,7 +255,7 @@ export function ParticleOrb({ size, state, level = 0 }: ParticleOrbProps) {
 
     frameId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frameId);
-  }, []);
+  }, [levelRef]);
 
   return (
     <View style={[styles.container, { width: size, height: size }]}>

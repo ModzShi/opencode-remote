@@ -20,6 +20,19 @@ import { useAppStore } from '@/store';
 import { websocket } from '@/utils/websocket';
 import { haptic } from '@/utils/haptics';
 import { ParticleOrb, OrbState } from '@/rafael/ParticleOrb';
+import { speak, stopSpeaking, voiceReady } from '@/rafael/voice';
+
+// O bridge do microfone só existe se o binário tiver o módulo nativo de áudio.
+/* eslint-disable @typescript-eslint/no-require-imports */
+const MicBridge = (() => {
+  try {
+    if (!voiceReady.mic) return null;
+    return (require('@/rafael/MicBridge') as typeof import('@/rafael/MicBridge')).MicBridge;
+  } catch {
+    return null;
+  }
+})();
+/* eslint-enable @typescript-eslint/no-require-imports */
 
 const EXIT_WORDS = ['sair do modo rafael', 'sair do modo', 'desligar rafael', 'fechar rafael'];
 
@@ -61,6 +74,8 @@ export function RafaelScreen() {
   const pinchBase = useRef(1);
   const moved = useRef(false);
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+  const micLevel = useRef(0);
+  const lastSpoken = useRef('');
 
   const session = sessions.find((item) => item.id === activeSessionId);
   const running = session?.status === 'running';
@@ -105,6 +120,18 @@ export function RafaelScreen() {
     void websocket.setSessionAgent(activeSessionId, 'rafael');
   }, [activeSessionId]);
 
+  // Rafael fala a resposta quando o streaming termina (só em build com voix nativa).
+  useEffect(() => {
+    if (!voiceReady.speech) return;
+    if (!lastAssistant || lastAssistant.streaming) return;
+    const text = lastAssistant.content?.trim();
+    if (!text || text === lastSpoken.current) return;
+    lastSpoken.current = text;
+    speak(text);
+  }, [lastAssistant]);
+
+  useEffect(() => () => stopSpeaking(), []);
+
   const close = useCallback(() => {
     haptic('light');
     if (router.canGoBack()) router.back();
@@ -113,6 +140,7 @@ export function RafaelScreen() {
 
   const openInput = useCallback(() => {
     haptic('light');
+    stopSpeaking();
     setWriting(true);
     setTimeout(() => inputRef.current?.focus(), 60);
   }, []);
@@ -212,6 +240,14 @@ export function RafaelScreen() {
   return (
     <View style={styles.root}>
       <StatusBar style="light" />
+      {MicBridge ? (
+        <MicBridge
+          enabled={writing}
+          onLevel={(value) => {
+            micLevel.current = value;
+          }}
+        />
+      ) : null}
 
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <View style={styles.brandRow}>
@@ -230,7 +266,7 @@ export function RafaelScreen() {
       >
         <View style={styles.orbArea} {...panResponder.panHandlers}>
           <Animated.View style={{ transform: [{ scale }] }}>
-            <ParticleOrb size={orbSize} state={orbState} />
+            <ParticleOrb size={orbSize} state={orbState} levelRef={micLevel} />
           </Animated.View>
         </View>
 
