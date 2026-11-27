@@ -9,7 +9,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.opencode.remote",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "OpenCode Remote precisa acessar a rede local para conectar ao seu PC",
         "NSBonjourServices": [
@@ -58,4 +58,3 @@
       }
     }
   }
-}
