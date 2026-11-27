@@ -42,6 +42,14 @@ Para ouvir comandos sem abrir o teclado é preciso mais um módulo nativo
 (`expo-speech-recognition` ou `@react-native-voice/voice`). É a mesma conta:
 uma dependência nativa a mais, um build na nuvem.
 
+## Voz do Fish Audio
+
+O Rafael fala com a voz escolhida no Fish Audio (`POST https://api.fish.audio/v1/tts`,`reference_id` no código).
+A chave **não** fica no repositório: ela é gravada no secret `FISH_API_KEY` do GitHub e
+injetada no build como `EXPO_PUBLIC_FISH_API_KEY` (o workflow já passa essa variável).
+Sem chave, o app cai sozinho na voz nativa do iOS (`expo-speech`). Para trocar a voz,
+mude `EXPO_PUBLIC_FISH_VOICE_ID` no workflow.
+
 ## Resumo
 
 | Recurso | Hoje | Com build nativo |

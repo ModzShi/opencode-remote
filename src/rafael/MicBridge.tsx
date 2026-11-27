@@ -34,6 +34,8 @@ export function MicBridge({ enabled, onLevel }: MicBridgeProps) {
       } catch {
         // nada a fazer
       }
+      // devolve o áudio para o alto-falante (modo gravação usa o fone)
+      void setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => undefined);
     };
 
     if (!enabled) {

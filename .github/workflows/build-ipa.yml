@@ -15,6 +15,11 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 90
 
+    env:
+      # Voz do Fish Audio: a chave vem do secret do repositório (nunca do código).
+      EXPO_PUBLIC_FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
+      EXPO_PUBLIC_FISH_VOICE_ID: '620fbba75326480b8aa6bae8974ace0c'
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
