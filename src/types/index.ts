@@ -75,6 +75,18 @@ export interface AppSettings {
   autoScroll: boolean;
   keepAlive: boolean;
   serverUrl?: string;
+  /** Voz do Fish Audio escolhida para o Rafael. */
+  rafaelVoiceId?: string;
+  /** Nome da voz (só para exibição). */
+  rafaelVoiceName?: string;
+  /** Modelo de TTS do Fish (s2.1-pro-free, s2-pro, s1...). */
+  rafaelTtsModel?: string;
+  /** Estilo do orbe (id do catálogo de orbes). */
+  rafaelOrb?: string;
+  /** Resumo falado quando a resposta é longa. */
+  rafaelSummary?: 'auto' | 'full' | 'off';
+  /** Modelo do agente usado no Rafael (enviado junto com o prompt). */
+  rafaelAgentModel?: string;
 }
 
 export interface QRCodeData {

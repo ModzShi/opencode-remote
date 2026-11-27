@@ -12,10 +12,14 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import { useTheme } from '@/hooks/useTheme';
 import { useAppStore } from '@/store';
 import { Button, Card } from '@/components/ui';
+import { VoicePicker } from '@/components/VoicePicker';
+import { FISH_VOICES, findVoice } from '@/rafael/voices';
+import { findOrb } from '@/rafael/orbs';
 import {
   Check,
   Copy,
@@ -23,7 +27,9 @@ import {
   Info,
   Monitor,
   Moon,
+  Orbit,
   RotateCcw,
+  Sparkles,
   Sun,
   Trash2,
 } from 'lucide-react-native';
@@ -45,9 +51,17 @@ const STATUS_LABEL: Record<string, string> = {
   error: 'Falha na conexão',
 };
 
+const TTS_MODELS = ['s2.1-pro-free', 's2-pro', 's1'];
+const SUMMARY_MODES: { value: 'auto' | 'full' | 'off'; label: string }[] = [
+  { value: 'auto', label: 'Resumo' },
+  { value: 'full', label: 'Completo' },
+  { value: 'off', label: 'Sem voz' },
+];
+
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { colors, isDark } = useTheme();
+  const router = useRouter();
+  const { colors } = useTheme();
 
   const settings = useAppStore((state) => state.settings);
   const setSettings = useAppStore((state) => state.setSettings);
@@ -60,6 +74,7 @@ export default function SettingsScreen() {
   const outputCount = useAppStore((state) => state.terminalOutput.length);
 
   const [copied, setCopied] = useState(false);
+  const [voicePicker, setVoicePicker] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const changeFontSize = (delta: number) => {
@@ -239,6 +254,89 @@ export default function SettingsScreen() {
         />
       </Section>
 
+      <Section title="Rafael">
+        <Row
+          label="Voz"
+          hint={`${FISH_VOICES.length} vozes do Fish Audio`}
+          onPress={() => setVoicePicker(true)}
+          right={
+            <Text style={[styles.valueText, { color: colors.primary }]}>
+              {findVoice(settings.rafaelVoiceId).name}
+            </Text>
+          }
+        />
+
+        <View style={styles.paddedRow}>
+          <Text style={[styles.rowLabel, { color: colors.foreground }]}>Modelo de voz</Text>
+          <Text style={[styles.rowHint, { color: colors.mutedForeground }]}>
+            s2.1-pro-free fala sem gastar crédito
+          </Text>
+          <Chips
+            options={TTS_MODELS.map((model) => ({ value: model, label: model }))}
+            value={settings.rafaelTtsModel ?? 's2.1-pro-free'}
+            onChange={(value) => setSettings({ rafaelTtsModel: value })}
+          />
+        </View>
+
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+        <View style={styles.paddedRow}>
+          <Text style={[styles.rowLabel, { color: colors.foreground }]}>Resposta falada</Text>
+          <Text style={[styles.rowHint, { color: colors.mutedForeground }]}>
+            Resposta longa vira um resumo rápido
+          </Text>
+          <Chips
+            options={SUMMARY_MODES}
+            value={settings.rafaelSummary ?? 'auto'}
+            onChange={(value) =>
+              setSettings({ rafaelSummary: value as 'auto' | 'full' | 'off' })
+            }
+          />
+        </View>
+
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+        <Row
+          label="Orbe"
+          hint="Forma do Rafael em modo voz"
+          onPress={() => router.push('/(tabs)/orbs')}
+          right={
+            <View style={styles.valueRow}>
+              <Text style={[styles.valueText, { color: colors.mutedForeground }]}>
+                {findOrb(settings.rafaelOrb).name}
+              </Text>
+              <Orbit size={16} color={colors.mutedForeground} />
+            </View>
+          }
+        />
+
+        <Row
+          label="Modelo do agente"
+          hint="Enviado junto com o prompt (opcional)"
+          onPress={() =>
+            Alert.prompt(
+              'Modelo do agente',
+              'Ex.: anthropic/claude-sonnet-4. Deixe vazio para usar o padrão do PC.',
+              (value) => setSettings({ rafaelAgentModel: value.trim() }),
+              'plain-text',
+              settings.rafaelAgentModel ?? ''
+            )
+          }
+          right={
+            <View style={styles.valueRow}>
+              <Text
+                numberOfLines={1}
+                style={[styles.valueText, { color: colors.mutedForeground, maxWidth: 150 }]}
+              >
+                {settings.rafaelAgentModel || 'padrão'}
+              </Text>
+              <Sparkles size={16} color={colors.mutedForeground} />
+            </View>
+          }
+          last
+        />
+      </Section>
+
       <Section title="Conexão">
         {pairedSession ? (
           <>
@@ -322,6 +420,16 @@ export default function SettingsScreen() {
         />
       </Section>
 
+      <VoicePicker
+        visible={voicePicker}
+        selectedId={settings.rafaelVoiceId}
+        onSelect={(voice) => {
+          setSettings({ rafaelVoiceId: voice.id, rafaelVoiceName: voice.name });
+          setVoicePicker(false);
+        }}
+        onClose={() => setVoicePicker(false)}
+      />
+
       <View style={styles.footer}>
         <Info size={13} color={colors.mutedForeground} />
         <Text style={[styles.footerText, { color: colors.mutedForeground }]}>
@@ -398,6 +506,47 @@ function Row({
   }
 
   return <View style={rowStyle}>{content}</View>;
+}
+
+function Chips({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.chips}>
+      {options.map((option) => {
+        const active = option.value === value;
+        return (
+          <Pressable
+            key={option.value}
+            onPress={() => onChange(option.value)}
+            style={[
+              styles.chip,
+              {
+                backgroundColor: active ? colors.primaryMuted : colors.muted,
+                borderColor: active ? colors.primary : 'transparent',
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.chipText,
+                { color: active ? colors.primary : colors.mutedForeground },
+              ]}
+            >
+              {option.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
 }
 
 function ToggleRow({
@@ -535,6 +684,31 @@ const styles = StyleSheet.create({
   },
   switch: {
     transform: [{ scale: 0.9 }],
+  },
+  valueText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+  },
+  valueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+  },
+  chipText: {
+    fontSize: 11.5,
+    fontWeight: '600',
   },
   statusDot: {
     width: 8,

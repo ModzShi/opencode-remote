@@ -1,60 +1,50 @@
-# Voz do Rafael — o que falta e como ligar
+# Voz do Rafael
 
-## Por que hoje não tem áudio
+Estado atual (v1.1.0): microfone, ditado e voz na nuvem já vão compilados no `.ipa`
+pelo workflow de CI (`macos-26` + prebuild + archive).
 
-O app que você instala é um `.ipa` **já compilado**. Eu só consigo trocar o `main.jsbundle`
-(JavaScript/Hermes) dentro dele. Microfone, gravação, síntese de voz e reprodução de áudio
-são **código nativo** (Swift/AVFoundation) — não dá para injetar por JS.
+## Como funciona
 
-Este binário não tem `expo-audio`, `expo-av` nem `expo-speech` compilados.
-Por isso o caminho atual é o ditado do teclado do iPhone dentro do campo do Rafael.
+1. **Toque no orbe** → o Rafael começa a ouvir (`expo-speech-recognition`, ditado do iOS em pt-BR).
+2. A transcrição aparece na legenda em tempo real. Quando você para de falar,
+   o texto é enviado sozinho para a sessão do OpenCode no PC.
+3. A resposta chega por streaming; ao terminar, o Rafael fala com a voz do Fish Audio.
+4. **Toque de novo** durante a fala encerra a escuta e envia o que já foi ouvido.
+5. **Digitar** abre o teclado para quem preferir escrever.
 
-## Como ligar de verdade (sem Mac)
+## Voz (Fish Audio)
 
-O build pode ser feito na nuvem pelo EAS:
+- Endpoint: `POST https://api.fish.audio/v1/tts`, modelo `s2.1-pro-free` (grátis).
+- A chave **não** fica no repositório: secret `FISH_API_KEY` do GitHub → `EXPO_PUBLIC_FISH_API_KEY` no build.
+- Sem chave, cai na voz nativa do iOS (`expo-speech`, pt-BR).
+- Ajustes → **Rafael**: 30 vozes do Fish (`src/rafael/voices.ts`), modelo de voz
+  (`s2.1-pro-free`, `s2-pro`, `s1`) e o modo de resposta falada.
 
-```bash
-npx expo install expo-audio expo-speech
-npx eas-cli build -p ios --profile preview
-```
+## Resposta longa = resumo falado
 
-Depois disso o binário passa a ter microfone (nível de áudio em tempo real) e voz sintetizada.
+Em **Ajustes → Rafael → Resposta falada**:
 
-## Código que passa a valer (src/rafael/voice.ts)
+| Modo | O que faz |
+|---|---|
+| Resumo | fala as primeiras frases (até ~210 caracteres) e avisa que o resto está na tela |
+| Completo | fala a resposta inteira |
+| Sem voz | não fala nada (útil no modo silencioso) |
 
-```ts
-import { useAudioRecorder, RecordingPresets } from 'expo-audio';
-import * as Speech from 'expo-speech';
+O áudio é fatiado em frases curtas e a próxima frase é sintetizada **enquanto** a atual
+toca — o primeiro som sai antes e não há pausas entre frases.
 
-export function speak(text: string) {
-  Speech.speak(text, { language: 'pt-BR', rate: 1.02, pitch: 1 });
-}
+## Latitude do ditado
 
-// nível 0..1 para o orbe reagir ao microfone
-export const levelRef = { current: 0 };
-```
+`maxAlternatives: 1`, `interimResults: true`, `continuous: true`, `addsPunctuation: true`.
+Se o usuário negar microfone/ditado, o app mostra um aviso e volta ao teclado.
 
-Aí `<ParticleOrb level={levelRef.current} />` passa a vibrar com a sua voz, não só com o texto.
+## Resumo dos recursos
 
-## Reconhecimento de fala (ditar sem teclado)
-
-Para ouvir comandos sem abrir o teclado é preciso mais um módulo nativo
-(`expo-speech-recognition` ou `@react-native-voice/voice`). É a mesma conta:
-uma dependência nativa a mais, um build na nuvem.
-
-## Voz do Fish Audio
-
-O Rafael fala com a voz escolhida no Fish Audio (`POST https://api.fish.audio/v1/tts`,`reference_id` no código).
-A chave **não** fica no repositório: ela é gravada no secret `FISH_API_KEY` do GitHub e
-injetada no build como `EXPO_PUBLIC_FISH_API_KEY` (o workflow já passa essa variável).
-Sem chave, o app cai sozinho na voz nativa do iOS (`expo-speech`). Para trocar a voz,
-mude `EXPO_PUBLIC_FISH_VOICE_ID` no workflow.
-
-## Resumo
-
-| Recurso | Hoje | Com build nativo |
-|---|---|---|
-| Orbe reagindo ao texto | sim | sim |
-| Orbe reagindo à voz | não | sim |
-| Rafael falando em voz alta | não | sim |
-| Comando de voz sem teclado | não (usa ditado do iOS) | sim |
+| Recurso | Estado |
+|---|---|
+| Orbe reagindo ao texto | sim |
+| Ditado sem teclado | sim (módulo nativo no build) |
+| Rafael falando em voz alta | sim (Fish; fallback iOS) |
+| Escolha da voz e do modelo de voz | sim (Ajustes) |
+| Resumo automático de respostas longas | sim |
+| Galeria de orbes | sim (aba Orbes, 20 estilos) |

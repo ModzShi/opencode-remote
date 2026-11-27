@@ -2,10 +2,10 @@ import { Tabs } from 'expo-router';
 import { StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/useTheme';
-import { MessageSquare, Settings, Wifi } from 'lucide-react-native';
+import { MessageSquare, Orbit, Settings, Wifi } from 'lucide-react-native';
 
 export default function TabsLayout() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
 
   return (
@@ -15,13 +15,14 @@ export default function TabsLayout() {
         tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.mutedForeground,
+        sceneStyle: { backgroundColor: colors.background },
         tabBarStyle: {
-          backgroundColor: colors.tabBarBackground,
+          backgroundColor: isDark ? 'rgba(9,9,11,0.92)' : colors.tabBarBackground,
           borderTopColor: colors.border,
           borderTopWidth: StyleSheet.hairlineWidth,
-          height: 52 + insets.bottom,
-          paddingTop: 6,
-          paddingBottom: Math.max(insets.bottom, 4),
+          height: 54 + insets.bottom,
+          paddingTop: 7,
+          paddingBottom: Math.max(insets.bottom, 6),
           elevation: 0,
         },
         tabBarLabelStyle: {
@@ -39,7 +40,16 @@ export default function TabsLayout() {
         options={{
           title: 'Chat',
           tabBarIcon: ({ focused, color }) => (
-            <MessageSquare size={21} color={color} strokeWidth={focused ? 2.4 : 2} />
+            <MessageSquare size={21} color={color} strokeWidth={focused ? 2.4 : 1.9} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="orbs"
+        options={{
+          title: 'Orbes',
+          tabBarIcon: ({ focused, color }) => (
+            <Orbit size={21} color={color} strokeWidth={focused ? 2.4 : 1.9} />
           ),
         }}
       />
@@ -48,7 +58,7 @@ export default function TabsLayout() {
         options={{
           title: 'Parear',
           tabBarIcon: ({ focused, color }) => (
-            <Wifi size={21} color={color} strokeWidth={focused ? 2.4 : 2} />
+            <Wifi size={21} color={color} strokeWidth={focused ? 2.4 : 1.9} />
           ),
         }}
       />
@@ -57,7 +67,7 @@ export default function TabsLayout() {
         options={{
           title: 'Ajustes',
           tabBarIcon: ({ focused, color }) => (
-            <Settings size={21} color={color} strokeWidth={focused ? 2.4 : 2} />
+            <Settings size={21} color={color} strokeWidth={focused ? 2.4 : 1.9} />
           ),
         }}
       />

@@ -6,6 +6,8 @@
  * chave configurada, a voz nativa do iOS.
  */
 
+import { useAppStore } from '@/store';
+
 type SpeechModule = {
   speak: (text: string, options?: Record<string, unknown>) => void;
   stop: () => void;
@@ -81,9 +83,12 @@ export function speak(text: string) {
   const clean = text.replace(/[`*_#>]/g, '').trim();
   if (!clean) return;
 
+  // Ajuste "sem voz": não fala nada.
+  if (useAppStore.getState().settings.rafaelSummary === 'off') return;
+
   if (Fish?.fishReady) {
     try {
-      if (Fish.speakFish(clean.slice(0, 900))) {
+      if (Fish.speakFish(clean)) {
         speaking = true;
         return;
       }

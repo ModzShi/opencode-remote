@@ -91,6 +91,12 @@ const defaultSettings: AppSettings = {
   compactMode: false,
   autoScroll: true,
   keepAlive: true,
+  rafaelVoiceId: undefined,
+  rafaelVoiceName: undefined,
+  rafaelTtsModel: 's2.1-pro-free',
+  rafaelOrb: 'particles',
+  rafaelSummary: 'auto',
+  rafaelAgentModel: '',
 };
 
 export const useAppStore = create<AppState>()(

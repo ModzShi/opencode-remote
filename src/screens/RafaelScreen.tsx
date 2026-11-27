@@ -13,19 +13,19 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowUp, X } from 'lucide-react-native';
+import { ArrowUp, Keyboard as KeyboardIcon, X } from 'lucide-react-native';
 import { useAppStore } from '@/store';
 import { websocket } from '@/utils/websocket';
 import { haptic } from '@/utils/haptics';
-import { ParticleOrb, OrbState } from '@/rafael/ParticleOrb';
+import { OrbView, type OrbState } from '@/rafael/OrbView';
 import { speak, stopSpeaking, voiceReady } from '@/rafael/voice';
 
-// O bridge do microfone só existe se o binário tiver o módulo nativo de áudio.
+// A escuta nativa só existe se o binário tiver o módulo instalado.
 /* eslint-disable @typescript-eslint/no-require-imports */
-const MicBridge = (() => {
+const VoiceListener = (() => {
   try {
-    if (!voiceReady.mic) return null;
-    return (require('@/rafael/MicBridge') as typeof import('@/rafael/MicBridge')).MicBridge;
+    require('expo-speech-recognition');
+    return (require('@/rafael/VoiceListener') as typeof import('@/rafael/VoiceListener')).VoiceListener;
   } catch {
     return null;
   }
@@ -33,6 +33,8 @@ const MicBridge = (() => {
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const EXIT_WORDS = ['sair do modo rafael', 'sair do modo', 'desligar rafael', 'fechar rafael'];
+const LISTEN_TIMEOUT = 20000;
+const SEND_DELAY = 700;
 
 function normalize(value: string): string {
   return value
@@ -55,16 +57,22 @@ export function RafaelScreen() {
   const storedMessages = useAppStore((state) => (state.activeSessionId ? state.messages[state.activeSessionId] : undefined));
   const messages = useMemo(() => storedMessages ?? [], [storedMessages]);
   const connectionStatus = useAppStore((state) => state.connectionStatus);
+  const orbVariant = useAppStore((state) => state.settings.rafaelOrb);
+  const agentModel = useAppStore((state) => state.settings.rafaelAgentModel);
 
   const [draft, setDraft] = useState('');
   const [writing, setWriting] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [heard, setHeard] = useState('');
   const [sending, setSending] = useState(false);
-  // O microfone só liga depois que o teclado terminou de abrir; ativar antes trava a tela.
-  const [micReady, setMicReady] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const micLevel = useRef(0);
   const lastSpoken = useRef('');
+  const heardRef = useRef('');
+  const sentRef = useRef(false);
+  const sendTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const session = sessions.find((item) => item.id === activeSessionId);
   const running = session?.status === 'running';
@@ -83,10 +91,11 @@ export function RafaelScreen() {
     return undefined;
   }, [messages]);
 
-  const orbState: OrbState =
-    connectionStatus !== 'connected'
+  const orbState: OrbState = !VoiceListener
+    ? 'error'
+    : connectionStatus !== 'connected'
       ? 'connecting'
-      : writing || sending
+      : listening || writing || sending
         ? 'listening'
         : running
           ? lastAssistant?.streaming
@@ -95,16 +104,17 @@ export function RafaelScreen() {
           : 'idle';
 
   const subtitle = useMemo(() => {
-    const spoken = (writing || sending) && draft.trim().length > 0 ? draft : null;
-    if (spoken) return spoken;
+    if (notice) return notice;
+    if (listening) return heard.trim() || 'Pode falar…';
+    if (writing && draft.trim().length > 0) return draft.trim();
     const text = lastAssistant?.content?.trim();
     if (text) return text;
     const mine = lastUser?.content?.trim();
     if (mine) return mine;
-    return 'Estou aqui. Fale ou digite, e eu conduzo o resto.';
-  }, [draft, lastAssistant, lastUser, sending, writing]);
+    return VoiceListener ? 'Toque no orbe e fale comigo.' : 'Digite: o ditado precisa da versão mais nova.';
+  }, [draft, heard, lastAssistant, lastUser, listening, notice, writing]);
 
-  // O texto chega em fluxo: agrupa as atualizações para o texto não custar caro.
+  // O texto chega em fluxo: agrupa as atualizações para não custar caro.
   const [shownSubtitle, setShownSubtitle] = useState(subtitle);
   useEffect(() => {
     if (subtitle === shownSubtitle) return;
@@ -117,40 +127,180 @@ export function RafaelScreen() {
     void websocket.setSessionAgent(activeSessionId, 'rafael');
   }, [activeSessionId]);
 
-  // Rafael fala a resposta quando o streaming termina (só em build com voix nativa).
+  // Rafael fala a resposta quando o streaming termina.
   useEffect(() => {
     if (!voiceReady.speech) return;
-    if (!lastAssistant || lastAssistant.streaming) return;
+    if (!lastAssistant || lastAssistant.streaming || listening) return;
     const text = lastAssistant.content?.trim();
     if (!text || text === lastSpoken.current) return;
     lastSpoken.current = text;
     speak(text);
-  }, [lastAssistant]);
+  }, [lastAssistant, listening]);
 
-  useEffect(() => () => stopSpeaking(), []);
+  useEffect(() => () => {
+    stopSpeaking();
+    if (sendTimer.current) clearTimeout(sendTimer.current);
+  }, []);
 
   const close = useCallback(() => {
     haptic('light');
+    stopSpeaking();
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)/terminal');
   }, [router]);
 
-  const openInput = useCallback(() => {
+  const send = useCallback(
+    async (raw: string) => {
+      const text = raw.trim();
+      if (!text) return;
+
+      const normalized = normalize(text);
+      if (EXIT_WORDS.some((word) => normalized.includes(word))) {
+        setHeard('');
+        heardRef.current = '';
+        close();
+        return;
+      }
+
+      if (!activeSessionId) {
+        haptic('error');
+        setNotice('Pareie o app com o PC primeiro.');
+        return;
+      }
+
+      haptic('tap');
+      setSending(true);
+      setHeard('');
+      heardRef.current = '';
+      stopSpeaking();
+      const ok = await websocket.sendCommand(text, activeSessionId, agentModel || undefined);
+      setSending(false);
+      if (!ok) {
+        haptic('error');
+        setNotice('Não consegui enviar. Verifique a conexão.');
+        setDraft(text);
+        setWriting(true);
+      } else {
+        setNotice(null);
+        setDraft('');
+      }
+    },
+    [activeSessionId, agentModel, close]
+  );
+
+  const stopListening = useCallback(() => {
+    setListening(false);
+    if (sendTimer.current) {
+      clearTimeout(sendTimer.current);
+      sendTimer.current = null;
+    }
+  }, []);
+
+  const onPartial = useCallback((text: string) => {
+    heardRef.current = text;
+    setHeard(text);
+    setNotice(null);
+    if (sendTimer.current) {
+      clearTimeout(sendTimer.current);
+      sendTimer.current = null;
+    }
+  }, []);
+
+  const onFinal = useCallback(
+    (text: string) => {
+      heardRef.current = text;
+      setHeard(text);
+      if (sendTimer.current) clearTimeout(sendTimer.current);
+      sendTimer.current = setTimeout(() => {
+        sendTimer.current = null;
+        if (sentRef.current) return;
+        sentRef.current = true;
+        setListening(false);
+        void send(text);
+      }, SEND_DELAY);
+    },
+    [send]
+  );
+
+  const onListenEnd = useCallback(() => {
+    const text = heardRef.current.trim();
+    if (sendTimer.current) return;
+    if (sentRef.current || !text) {
+      setListening(false);
+      return;
+    }
+    sentRef.current = true;
+    setListening(false);
+    void send(text);
+  }, [send]);
+
+  const onListenError = useCallback((code: string) => {
+    setListening(false);
+    if (code === 'permission') {
+      setNotice('Permita o microfone e o ditado nos ajustes do iOS.');
+      haptic('error');
+    } else if (code !== 'no-speech') {
+      setNotice('Não consegui ouvir. Toque e tente de novo.');
+    }
+  }, []);
+
+  const toggleListening = useCallback(() => {
+    if (writing) {
+      setWriting(false);
+      Keyboard.dismiss();
+      return;
+    }
+    if (listening) {
+      const text = heardRef.current.trim();
+      stopListening();
+      if (text && !sentRef.current) {
+        sentRef.current = true;
+        void send(text);
+      }
+      return;
+    }
+
+    if (!VoiceListener) {
+      setWriting(true);
+      return;
+    }
+
     haptic('light');
     stopSpeaking();
+    if (sendTimer.current) {
+      clearTimeout(sendTimer.current);
+      sendTimer.current = null;
+    }
+    setNotice(null);
+    setHeard('');
+    heardRef.current = '';
+    sentRef.current = false;
+    setListening(true);
+  }, [listening, send, stopListening, writing]);
+
+  // Encerra a escuta sozinho se ninguém falar.
+  useEffect(() => {
+    if (!listening) return;
+    const id = setTimeout(() => {
+      setListening(false);
+      const text = heardRef.current.trim();
+      if (text && !sentRef.current) {
+        sentRef.current = true;
+        void send(text);
+      }
+    }, LISTEN_TIMEOUT);
+    return () => clearTimeout(id);
+  }, [listening, send]);
+
+  const openKeyboard = useCallback(() => {
+    haptic('light');
+    stopListening();
     setWriting(true);
-  }, []);
+  }, [stopListening]);
 
   const closeInput = useCallback(() => {
     setWriting(false);
-    setMicReady(false);
   }, []);
-
-  useEffect(() => {
-    if (!writing) return;
-    const id = setTimeout(() => setMicReady(true), 700);
-    return () => clearTimeout(id);
-  }, [writing]);
 
   const submit = useCallback(async () => {
     const text = draft.trim();
@@ -159,42 +309,16 @@ export function RafaelScreen() {
       Keyboard.dismiss();
       return;
     }
-
-    const normalized = normalize(text);
-    if (EXIT_WORDS.some((word) => normalized.includes(word))) {
-      setDraft('');
-      closeInput();
-      Keyboard.dismiss();
-      close();
-      return;
-    }
-
-    if (!activeSessionId) {
-      haptic('error');
-      return;
-    }
-
-    setSending(true);
     setDraft('');
-    haptic('tap');
-    const ok = await websocket.sendCommand(text, activeSessionId);
-    setSending(false);
-    if (!ok) {
-      haptic('error');
-      setDraft(text);
-      return;
-    }
     closeInput();
     Keyboard.dismiss();
-  }, [activeSessionId, close, closeInput, draft]);
+    await send(text);
+  }, [closeInput, draft, send]);
 
-  const handleLevel = useCallback((value: number) => {
-    micLevel.current = value;
-  }, []);
-
-  const orbSize = Math.min(Dimensions.get('window').width * 0.86, 380);
-  const statusLabel =
-    connectionStatus !== 'connected'
+  const orbSize = Math.min(Dimensions.get('window').width * 0.82, 340);
+  const statusLabel = !VoiceListener
+    ? 'sem ditado'
+    : connectionStatus !== 'connected'
       ? 'reconectando'
       : orbState === 'listening'
         ? 'ouvindo'
@@ -207,10 +331,13 @@ export function RafaelScreen() {
   return (
     <View style={styles.root}>
       <StatusBar style="light" />
-      {MicBridge ? (
-        <MicBridge
-          enabled={micReady}
-          onLevel={handleLevel}
+      {VoiceListener ? (
+        <VoiceListener
+          active={listening}
+          onPartial={onPartial}
+          onFinal={onFinal}
+          onError={onListenError}
+          onEnd={onListenEnd}
         />
       ) : null}
 
@@ -221,48 +348,52 @@ export function RafaelScreen() {
           <Text style={styles.status}>{statusLabel}</Text>
         </View>
         <Pressable onPress={close} hitSlop={12} style={styles.close}>
-          <X size={18} color="#7a7a7a" strokeWidth={2.2} />
+          <X size={18} color="#8a8f9c" strokeWidth={2.2} />
         </Pressable>
       </View>
 
       <View style={styles.body}>
-        <Pressable style={styles.orbArea} onPress={openInput}>
-          <ParticleOrb size={orbSize} state={orbState} levelRef={micLevel} />
+        <Pressable style={styles.orbArea} onPress={toggleListening}>
+          <OrbView size={orbSize} state={orbState} variant={orbVariant} levelRef={micLevel} />
         </Pressable>
 
         <View style={styles.captionArea}>
           <Text numberOfLines={5} style={styles.caption}>
             {shownSubtitle}
           </Text>
-          {!writing ? <Text style={styles.hint}>toque para falar</Text> : null}
+          {!writing && !listening ? <Text style={styles.hint}>toque para falar</Text> : null}
         </View>
 
         {writing ? (
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={[styles.composer, { marginBottom: Math.max(insets.bottom, 14) }]}>
-            <TextInput
-              ref={inputRef}
-              value={draft}
-              onChangeText={setDraft}
-              onSubmitEditing={submit}
-              onBlur={closeInput}
-              autoFocus
-              placeholder="fale com o Rafael"
-              placeholderTextColor="#4a4a4a"
-              style={styles.input}
-              multiline
-              blurOnSubmit
-              returnKeyType="send"
-            />
-            <Pressable onPress={submit} style={styles.send} hitSlop={10}>
-              <ArrowUp size={18} color="#000" strokeWidth={3} />
-            </Pressable>
-          </View>
+            <View style={[styles.composer, { marginBottom: Math.max(insets.bottom, 14) }]}>
+              <TextInput
+                ref={inputRef}
+                value={draft}
+                onChangeText={setDraft}
+                onSubmitEditing={submit}
+                onBlur={closeInput}
+                autoFocus
+                placeholder="fale com o Rafael"
+                placeholderTextColor="#4a4a4a"
+                style={styles.input}
+                multiline
+                blurOnSubmit
+                returnKeyType="send"
+              />
+              <Pressable onPress={submit} style={styles.send} hitSlop={10}>
+                <ArrowUp size={18} color="#000" strokeWidth={3} />
+              </Pressable>
+            </View>
           </KeyboardAvoidingView>
         ) : (
-          <Text style={[styles.footer, { marginBottom: Math.max(insets.bottom, 14) }]}>
-            diga “sair do modo rafael” para voltar ao chat
-          </Text>
+          <View style={[styles.footerRow, { marginBottom: Math.max(insets.bottom, 14) }]}>
+            <Pressable onPress={openKeyboard} hitSlop={10} style={styles.keyboardButton}>
+              <KeyboardIcon size={16} color="#8a8f9c" strokeWidth={2} />
+              <Text style={styles.keyboardLabel}>digitar</Text>
+            </Pressable>
+            <Text style={styles.footer}>“sair do modo rafael” encerra</Text>
+          </View>
         )}
       </View>
     </View>
@@ -279,17 +410,17 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  brandDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#ffffff' },
+  brandDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#7ee7ff' },
   brand: { color: '#ffffff', fontSize: 11, fontWeight: '800', letterSpacing: 5.5 },
   status: { color: '#5c5c5c', fontSize: 10.5, letterSpacing: 2.4, textTransform: 'uppercase' },
   close: { padding: 6 },
   body: { flex: 1, justifyContent: 'space-between' },
   orbArea: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  captionArea: { paddingHorizontal: 26, paddingBottom: 10, minHeight: 130, justifyContent: 'flex-end' },
+  captionArea: { paddingHorizontal: 26, paddingBottom: 10, minHeight: 118, justifyContent: 'flex-end' },
   caption: {
     color: '#ffffff',
-    fontSize: 27,
-    lineHeight: 34,
+    fontSize: 25,
+    lineHeight: 32,
     fontWeight: '800',
     letterSpacing: -0.4,
     textAlign: 'center',
@@ -311,9 +442,9 @@ const styles = StyleSheet.create({
     paddingRight: 6,
     paddingVertical: 6,
     borderRadius: 28,
-    backgroundColor: '#101010',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#262626',
+    borderColor: 'rgba(255,255,255,0.14)',
   },
   input: {
     flex: 1,
@@ -333,10 +464,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  footer: {
-    color: '#3f3f3f',
-    fontSize: 11,
-    letterSpacing: 1.4,
-    textAlign: 'center',
+  footerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 22,
+    gap: 12,
   },
+  keyboardButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  keyboardLabel: { color: '#8a8f9c', fontSize: 11.5, fontWeight: '600' },
+  footer: { color: '#3f3f3f', fontSize: 10.5, letterSpacing: 0.6 },
 });

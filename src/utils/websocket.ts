@@ -683,13 +683,13 @@ class OpenCodeSSE {
    * Send a prompt/message to a session via HTTP POST.
    * Uses /api/session/:sessionID/prompt endpoint (body: { text }).
    */
-  async sendCommand(command: string, sessionId: string): Promise<boolean> {
+  async sendCommand(command: string, sessionId: string, model?: string): Promise<boolean> {
     if (!sessionId) return false;
 
     const payload = await this.request(`/api/session/${sessionId}/prompt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: command }),
+      body: JSON.stringify(model ? { text: command, model } : { text: command }),
     });
 
     return payload !== null;
