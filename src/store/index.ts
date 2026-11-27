@@ -1,7 +1,18 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AppSettings, OpenCodeSession, OpenCodeMessage, ConnectionStatus, PairingData, TerminalOutput, FileNode } from '@/types';
+import {
+  AppSettings,
+  OpenCodeSession,
+  OpenCodeMessage,
+  ConnectionStatus,
+  PairingData,
+  TerminalOutput,
+  FileNode,
+  MessagePart,
+  TextPart,
+} from '@/types';
+import type { UpdateInfo } from '@/utils/updates';
 
 interface AppState {
   // Settings
@@ -33,6 +44,18 @@ interface AppState {
   setMessages: (sessionId: string, messages: OpenCodeMessage[]) => void;
   clearMessages: (sessionId: string) => void;
   updateMessage: (sessionId: string, messageId: string, updates: Partial<OpenCodeMessage>) => void;
+  upsertMessage: (sessionId: string, message: OpenCodeMessage) => void;
+  patchMessage: (
+    sessionId: string,
+    messageId: string,
+    patch: (message: OpenCodeMessage) => Partial<OpenCodeMessage>
+  ) => void;
+  appendPart: (
+    sessionId: string,
+    messageId: string,
+    kind: 'text' | 'reasoning',
+    delta: string
+  ) => void;
 
   // Terminal
   terminalOutput: TerminalOutput[];
@@ -53,6 +76,10 @@ interface AppState {
   // Input
   pendingInput: string;
   setPendingInput: (input: string) => void;
+
+  // Atualizações
+  updateInfo: UpdateInfo | null;
+  setUpdateInfo: (info: UpdateInfo | null) => void;
 }
 
 const defaultSettings: AppSettings = {
@@ -92,9 +119,15 @@ export const useAppStore = create<AppState>()(
       activeSessionId: null,
       setSessions: (sessions) => set({ sessions }),
       addSession: (session) =>
-        set((state) => ({
-          sessions: [...state.sessions, session],
-        })),
+        set((state) => {
+          const existing = state.sessions.findIndex((item) => item.id === session.id);
+          if (existing === -1) {
+            return { sessions: [...state.sessions, session] };
+          }
+          const sessions = [...state.sessions];
+          sessions[existing] = { ...sessions[existing], ...session };
+          return { sessions };
+        }),
       updateSession: (id, updates) =>
         set((state) => ({
           sessions: state.sessions.map((s) => (s.id === id ? { ...s, ...updates } : s)),
@@ -134,6 +167,61 @@ export const useAppStore = create<AppState>()(
             ) || [],
           },
         })),
+      upsertMessage: (sessionId, message) =>
+        set((state) => {
+          const list = state.messages[sessionId] ?? [];
+          const index = list.findIndex((item) => item.id === message.id);
+          if (index === -1) {
+            return { messages: { ...state.messages, [sessionId]: [...list, message] } };
+          }
+          const next = [...list];
+          next[index] = { ...next[index], ...message };
+          return { messages: { ...state.messages, [sessionId]: next } };
+        }),
+      patchMessage: (sessionId, messageId, patch) =>
+        set((state) => {
+          const list = state.messages[sessionId];
+          if (!list) return {};
+          let touched = false;
+          const next = list.map((item) => {
+            if (item.id !== messageId) return item;
+            touched = true;
+            return { ...item, ...patch(item) };
+          });
+          if (!touched) return {};
+          return { messages: { ...state.messages, [sessionId]: next } };
+        }),
+      appendPart: (sessionId, messageId, kind, delta) =>
+        set((state) => {
+          const list = state.messages[sessionId];
+          if (!list) return {};
+          const index = list.findIndex((item) => item.id === messageId);
+          if (index === -1) return {};
+
+          const message = list[index];
+          const parts: MessagePart[] = message.parts
+            ? [...message.parts]
+            : [{ type: 'text', text: message.content }];
+
+          const partIndex = parts.findIndex((part) => part.type === kind);
+          if (partIndex === -1) {
+            parts.push(kind === 'reasoning' ? { type: 'reasoning', text: delta } : { type: 'text', text: delta });
+          } else {
+            const part = parts[partIndex];
+            if (part.type === 'text' || part.type === 'reasoning') {
+              parts[partIndex] = { ...part, text: part.text + delta };
+            }
+          }
+
+          const content = parts
+            .filter((part): part is TextPart => part.type === 'text')
+            .map((part) => part.text)
+            .join('');
+
+          const next = [...list];
+          next[index] = { ...message, parts, content, streaming: true };
+          return { messages: { ...state.messages, [sessionId]: next } };
+        }),
 
       // Terminal
       terminalOutput: [],
@@ -163,6 +251,10 @@ export const useAppStore = create<AppState>()(
       // Input
       pendingInput: '',
       setPendingInput: (input) => set({ pendingInput: input }),
+
+      // Atualizações
+      updateInfo: null,
+      setUpdateInfo: (info) => set({ updateInfo: info }),
     }),
     {
       name: 'opencode-remote-storage',

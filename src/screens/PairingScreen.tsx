@@ -64,11 +64,11 @@ export default function PairingScreen() {
     try {
       // Guarda o pareamento antes de conectar para o ConnectionManager não derrubar a conexão.
       setPairedSession(data);
-      await websocket.connect(data);
+      const connected = await websocket.connect(data);
 
-      const err = useAppStore.getState().connectionError;
-      if (err) {
-        Alert.alert('Falha no pareamento', err);
+      if (!connected) {
+        const err = useAppStore.getState().connectionError;
+        Alert.alert('Falha no pareamento', err ?? 'Não foi possível conectar ao PC.');
         return;
       }
 

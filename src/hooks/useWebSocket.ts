@@ -27,9 +27,7 @@ export function useWebSocket() {
     }
   };
 
-  const createSession = (name: string, workingDirectory: string) => {
-    websocket.createSession(name, workingDirectory);
-  };
+  const createSession = () => websocket.createSession();
 
   return {
     sendCommand,

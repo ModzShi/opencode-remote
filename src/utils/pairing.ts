@@ -10,6 +10,24 @@ function firstString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
+/** Primeiro item string de uma lista (o QR do opencode traz "urls": [...]). */
+function firstFromArray(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (!Array.isArray(value)) continue;
+    const found = firstString(...value);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/** Converte wss://host → https://host (base para o POST do código). */
+function toHttpOrigin(endpoint: string): string {
+  return endpoint
+    .replace(/^wss:\/\//i, 'https://')
+    .replace(/^ws:\/\//i, 'http://')
+    .replace(/\/+$/, '');
+}
+
 function safeJson(text: string): any {
   try {
     return JSON.parse(text);
@@ -162,14 +180,18 @@ export function parsePairingPayload(raw: string): PairingData | null {
     candidate = candidate.payload;
   }
 
-  const endpoint = firstString(
-    candidate.endpoint,
-    candidate.url,
-    candidate.server,
-    candidate.host,
-    candidate.ws,
-    candidate.address
-  );
+  // O QR do "opencode pair --remote" é `{"code":"...","urls":["https://host"]}`.
+  const endpoint =
+    firstString(
+      candidate.endpoint,
+      candidate.url,
+      candidate.server,
+      candidate.host,
+      candidate.ws,
+      candidate.address,
+      candidate.baseUrl,
+      candidate.serverUrl
+    ) ?? firstFromArray(candidate.urls, candidate.servers, candidate.endpoints);
 
   if (!endpoint) return null;
 
@@ -193,30 +215,44 @@ export function parsePairingPayload(raw: string): PairingData | null {
         ? candidate.expires_at
         : Date.now() + 24 * 60 * 60 * 1000;
 
-  // Extract baseUrl and pairing code for HTTPS pairing URLs
+  const normalizedEndpoint = normalizeEndpoint(endpoint);
+
+  // Código de pareamento: vem no JSON do QR ("code") ou no path do link
+  // https://host/auth/connect/CODE.
+  let pairingCode = firstString(
+    candidate.code,
+    candidate.pairingCode,
+    candidate.pairing_code,
+    candidate.pin
+  ) ?? '';
   let baseUrl = '';
-  let pairingCode = '';
-  if (text.startsWith('https://') || text.startsWith('http://')) {
+
+  if (/^https?:\/\//i.test(text)) {
     try {
       const url = new URL(text);
       baseUrl = `${url.protocol}//${url.host}`;
-      // Extract code from /auth/connect/CODE path
-      const pathParts = url.pathname.split('/').filter(Boolean);
-      if (pathParts[0] === 'auth' && pathParts[1] === 'connect' && pathParts[2]) {
-        pairingCode = pathParts[2];
+      if (!pairingCode) {
+        const pathParts = url.pathname.split('/').filter(Boolean);
+        if (pathParts[0] === 'auth' && pathParts[1] === 'connect' && pathParts[2]) {
+          pairingCode = pathParts[2];
+        }
       }
     } catch {
-      // ignore
+      // URL inválida: o endpoint normalizado ainda serve
     }
   }
 
+  if (pairingCode && !baseUrl) {
+    baseUrl = toHttpOrigin(normalizedEndpoint);
+  }
+
   return {
-    endpoint: normalizeEndpoint(endpoint),
+    endpoint: normalizedEndpoint,
     publicKey,
     sessionId,
     expiresAt,
-    // Store baseUrl and pairingCode for token exchange
-    token: pairingCode ? `${baseUrl}|${pairingCode}` : undefined,
+    // "baseUrl|code": websocket.connect() troca por token antes de abrir o SSE.
+    token: pairingCode && baseUrl ? `${baseUrl}|${pairingCode}` : undefined,
   };
 }
 

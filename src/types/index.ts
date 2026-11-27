@@ -5,14 +5,46 @@ export interface OpenCodeSession {
   workingDirectory: string;
   lastActivity: number;
   pid?: number;
+  model?: string;
+  agent?: string;
+  cost?: number;
+  tokens?: { input: number; output: number; reasoning?: number };
 }
+
+export interface ReasoningPart {
+  type: 'reasoning';
+  text: string;
+}
+
+export interface TextPart {
+  type: 'text';
+  text: string;
+}
+
+export interface ToolPart {
+  type: 'tool';
+  name: string;
+  status: 'running' | 'done' | 'error';
+  input?: string;
+  output?: string;
+}
+
+export type MessagePart = TextPart | ReasoningPart | ToolPart;
 
 export interface OpenCodeMessage {
   id: string;
   sessionId: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
+  /** Texto principal (mantido para compatibilidade com telas antigas). */
   content: string;
   timestamp: number;
+  parts?: MessagePart[];
+  streaming?: boolean;
+  error?: string;
+  model?: string;
+  agent?: string;
+  cost?: number;
+  tokens?: { input: number; output: number; reasoning?: number };
   toolName?: string;
   toolArgs?: Record<string, unknown>;
   toolResult?: unknown;

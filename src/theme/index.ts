@@ -29,6 +29,16 @@ const light = {
   terminalForeground: '#1D2939',
   tabBarBackground: '#FFFFFF',
   overlay: 'rgba(16,24,40,0.45)',
+  codeBackground: '#F2F4F9',
+  codeBorder: '#E3E7EF',
+  bubbleUser: 'rgba(10,108,214,0.09)',
+  bubbleUserBorder: 'rgba(10,108,214,0.18)',
+  bubbleAssistant: '#FFFFFF',
+  shadow: 'rgba(16,24,40,0.10)',
+  online: '#12B76A',
+  warnSurface: 'rgba(247,144,9,0.10)',
+  errorSurface: 'rgba(217,45,32,0.07)',
+  successSurface: 'rgba(18,183,106,0.10)',
 };
 
 const dark: typeof light = {
@@ -60,6 +70,16 @@ const dark: typeof light = {
   terminalForeground: '#D7DEEA',
   tabBarBackground: '#0E1118',
   overlay: 'rgba(0,0,0,0.6)',
+  codeBackground: '#0F131C',
+  codeBorder: '#1E2534',
+  bubbleUser: 'rgba(110,168,254,0.13)',
+  bubbleUserBorder: 'rgba(110,168,254,0.22)',
+  bubbleAssistant: '#11151E',
+  shadow: 'rgba(0,0,0,0.55)',
+  online: '#47CD89',
+  warnSurface: 'rgba(253,176,34,0.10)',
+  errorSurface: 'rgba(249,112,102,0.10)',
+  successSurface: 'rgba(71,205,137,0.10)',
 };
 
 export type ThemeColors = typeof light;

@@ -2,7 +2,7 @@ import { Tabs } from 'expo-router';
 import { StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/useTheme';
-import { Settings, Terminal, Wifi } from 'lucide-react-native';
+import { MessageSquare, Settings, Wifi } from 'lucide-react-native';
 
 export default function TabsLayout() {
   const { colors } = useTheme();
@@ -37,9 +37,9 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="terminal"
         options={{
-          title: 'Terminal',
+          title: 'Chat',
           tabBarIcon: ({ focused, color }) => (
-            <Terminal size={21} color={color} strokeWidth={focused ? 2.4 : 2} />
+            <MessageSquare size={21} color={color} strokeWidth={focused ? 2.4 : 2} />
           ),
         }}
       />
