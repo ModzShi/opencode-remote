@@ -1,4 +1,5 @@
 import { PairingData } from '@/types';
+import { base64Encode } from './base64';
 
 function firstString(...values: unknown[]): string | undefined {
   for (const value of values) {
@@ -60,7 +61,7 @@ export async function exchangePairingCode(baseUrl: string, code: string): Promis
  * auth_token = base64("opencode:" + token)
  */
 export function buildSseEndpoint(baseUrl: string, token: string): string {
-  const authToken = btoa(`opencode:${token}`);
+  const authToken = base64Encode(`opencode:${token}`);
   const base = baseUrl.replace(/\/+$/, '');
   return `${base}/api/event?auth_token=${encodeURIComponent(authToken)}`;
 }

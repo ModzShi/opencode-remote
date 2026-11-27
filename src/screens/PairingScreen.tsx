@@ -17,7 +17,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { useAppStore } from '@/store';
 import { Button, Card, Input } from '@/components/ui';
 import { QRScanner } from '@/components/QRScanner';
-import { normalizeEndpoint, parsePairingPayload, exchangePairingCode, buildSseEndpoint } from '@/utils/pairing';
+import { normalizeEndpoint, parsePairingPayload } from '@/utils/pairing';
 import { websocket } from '@/utils/websocket';
 import { PairingData } from '@/types';
 import {
@@ -47,6 +47,7 @@ export default function PairingScreen() {
 
   const pairedSession = useAppStore((state) => state.pairedSession);
   const connectionStatus = useAppStore((state) => state.connectionStatus);
+  const connectionError = useAppStore((state) => state.connectionError);
   const setPairedSession = useAppStore((state) => state.setPairedSession);
   const settings = useAppStore((state) => state.settings);
   const clearPairing = useAppStore((state) => state.clearPairing);
@@ -60,36 +61,22 @@ export default function PairingScreen() {
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const applyPairing = async (data: PairingData) => {
-    // If we have a token in format "baseUrl|pairingCode", exchange it first
-    let pairingData = data;
-    
-    if (data.token && data.token.includes('|')) {
-      const [baseUrl, pairingCode] = data.token.split('|');
-      const token = await exchangePairingCode(baseUrl, pairingCode);
-      
-      if (!token) {
-        Alert.alert(
-          'Falha no pareamento',
-          'Não foi possível obter o token do servidor. Verifique se o QR Code não expirou (5 min).'
-        );
+    try {
+      // Guarda o pareamento antes de conectar para o ConnectionManager não derrubar a conexão.
+      setPairedSession(data);
+      await websocket.connect(data);
+
+      const err = useAppStore.getState().connectionError;
+      if (err) {
+        Alert.alert('Falha no pareamento', err);
         return;
       }
-      
-      // Build SSE endpoint with the obtained token
-      const sseEndpoint = buildSseEndpoint(baseUrl, token);
-      
-      pairingData = {
-        ...data,
-        endpoint: sseEndpoint,
-        publicKey: token, // Store token as publicKey for auth
-        token: undefined, // Clear the raw token
-      };
+
+      if (settings.hapticsEnabled) Vibration.vibrate(40);
+      router.replace('/(tabs)/terminal');
+    } catch (error: any) {
+      Alert.alert('Erro ao parear', error?.message ?? 'Erro desconhecido');
     }
-    
-    websocket.connect(pairingData);
-    setPairedSession(pairingData);
-    if (settings.hapticsEnabled) Vibration.vibrate(40);
-    router.replace('/(tabs)/terminal');
   };
 
   const handleScan = (raw: string): boolean => {
@@ -419,6 +406,21 @@ export default function PairingScreen() {
                 <WifiOff size={18} color={colors.mutedForeground} />
               )}
             </View>
+            {connectionError ? (
+              <Text style={[styles.errorText, { color: colors.destructive }]}>
+                {connectionError}
+              </Text>
+            ) : null}
+            {!connected ? (
+              <Button
+                size="sm"
+                fullWidth
+                onPress={() => websocket.connect(pairedSession)}
+                style={styles.retry}
+              >
+                Reconectar
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               size="sm"
@@ -605,6 +607,14 @@ const styles = StyleSheet.create({
   disconnect: {
     marginTop: 8,
     alignSelf: 'flex-start',
+  },
+  errorText: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 10,
+  },
+  retry: {
+    marginTop: 10,
   },
   fieldRow: {
     flexDirection: 'row',

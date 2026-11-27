@@ -8,7 +8,10 @@ export function useWebSocket() {
 
   useEffect(() => {
     if (!pairedSession) {
-      websocket.disconnect();
+      // Não derruba uma conexão que está sendo aberta (troca de token em andamento).
+      if (connectionStatus !== 'connecting') {
+        websocket.disconnect();
+      }
       return;
     }
 

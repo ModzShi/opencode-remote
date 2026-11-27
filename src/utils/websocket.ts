@@ -1,5 +1,7 @@
 import { useAppStore } from '@/store';
 import { PairingData } from '@/types';
+import { basicAuthHeader } from './base64';
+import { buildSseEndpoint, exchangePairingCode } from './pairing';
 
 type MessageHandler = (message: any) => void;
 
@@ -8,7 +10,7 @@ const RECONNECT_BASE_DELAY = 1000;
 
 /**
  * Parse SSE (Server-Sent Events) stream.
- * Each event is separated by double newline, data lines start with "data: ".
+ * Each event is separated by a blank line, data lines start with "data:".
  */
 function parseSSEStream(buffer: string): { events: any[]; remaining: string } {
   const events: any[] = [];
@@ -66,8 +68,7 @@ function getAuthInfo(pairingData: PairingData): { baseUrl: string; authToken: st
   baseUrl = baseUrl.split('/api/event')[0];
   baseUrl = baseUrl.replace(/\/+$/, '');
 
-  const authToken = btoa(`opencode:${token}`);
-  return { baseUrl, authToken };
+  return { baseUrl, authToken: basicAuthHeader(token) };
 }
 
 class OpenCodeSSE {
@@ -78,34 +79,46 @@ class OpenCodeSSE {
   private pairedSession: PairingData | null = null;
   private buffer = '';
 
-  connect(pairingData: PairingData) {
+  /**
+   * Conecta ao servidor opencode.
+   * Se o pareamento ainda estiver no formato "baseUrl|code", troca o código
+   * pelo token antes de abrir o SSE (funciona também para sessões persistidas).
+   */
+  async connect(pairingData: PairingData) {
     this.close();
     this.pairedSession = pairingData;
-    useAppStore.getState().setConnectionStatus('connecting');
+    this.reconnectAttempts = 0;
 
-    // Extract token from pairingData.token (format: "baseUrl|pairingCode")
-    let sseUrl = pairingData.endpoint;
-    const token = pairingData.token;
+    const store = useAppStore.getState();
+    store.setConnectionError(null);
+    store.setConnectionStatus('connecting');
 
-    if (token && token.includes('|')) {
-      const [baseUrl] = token.split('|');
-      // For now, assume token was already exchanged and stored in publicKey
-      // In practice, we'd exchange the code first
-      sseUrl = `${baseUrl.replace(/\/+$/, '')}/api/event?auth_token=${encodeURIComponent(btoa(`opencode:${pairingData.publicKey}`))}`;
-    } else if (pairingData.publicKey) {
-      // Use publicKey as token for auth
-      // Check if endpoint is already an SSE URL (contains /api/event)
-      if (pairingData.endpoint.includes('/api/event')) {
-        // Already an SSE URL, use as-is (may need to update auth_token if token changed)
-        sseUrl = pairingData.endpoint;
-      } else {
-        // Legacy WebSocket URL, convert to SSE
-        const baseUrl = pairingData.endpoint.replace(/^wss?:\/\//i, 'https://').replace(/\/+$/, '');
-        sseUrl = `${baseUrl}/api/event?auth_token=${encodeURIComponent(btoa(`opencode:${pairingData.publicKey}`))}`;
+    let effective = pairingData;
+
+    if (pairingData.token && pairingData.token.includes('|')) {
+      const [baseUrl, code] = pairingData.token.split('|');
+      const token = await exchangePairingCode(baseUrl, code);
+
+      if (!token) {
+        store.setConnectionError(
+          'Não foi possível obter o token do servidor. O QR expira em 5 min — rode "opencode pair --remote" de novo.'
+        );
+        store.setConnectionStatus('error');
+        return;
       }
+
+      effective = {
+        ...pairingData,
+        endpoint: buildSseEndpoint(baseUrl, token),
+        publicKey: token,
+        token: undefined,
+      };
+      this.pairedSession = effective;
+      // Persiste o token já trocado para não reutilizar o código de uso único.
+      useAppStore.getState().setPairedSession(effective);
     }
 
-    this.startConnection(sseUrl);
+    this.startConnection(effective.endpoint);
   }
 
   private async startConnection(url: string) {
@@ -117,23 +130,32 @@ class OpenCodeSSE {
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'Accept': 'text/event-stream',
+          Accept: 'text/event-stream',
           'Cache-Control': 'no-cache',
         },
         signal: this.controller.signal,
       });
 
       if (!response.ok) {
-        throw new Error(`SSE connection failed: ${response.status}`);
+        let detail = '';
+        try {
+          detail = (await response.text()).slice(0, 140);
+        } catch {
+          // ignore
+        }
+        throw new Error(`HTTP ${response.status}${detail ? ` — ${detail}` : ''}`);
       }
 
       if (this.controller?.signal.aborted) return;
 
       this.reconnectAttempts = 0;
+      useAppStore.getState().setConnectionError(null);
       useAppStore.getState().setConnectionStatus('connected');
 
       const reader = response.body?.getReader();
-      if (!reader) throw new Error('No response body');
+      if (!reader) {
+        throw new Error('Streaming indisponível neste build (response.body vazio)');
+      }
 
       const decoder = new TextDecoder();
 
@@ -143,6 +165,7 @@ class OpenCodeSSE {
         if (this.controller?.signal.aborted) break;
 
         this.buffer += decoder.decode(value, { stream: true });
+        this.buffer = this.buffer.replace(/\r\n/g, '\n');
         const { events, remaining } = parseSSEStream(this.buffer);
         this.buffer = remaining;
 
@@ -150,9 +173,15 @@ class OpenCodeSSE {
           this.handleMessage(event.data);
         }
       }
-    } catch (error) {
+
+      if (!this.controller?.signal.aborted) {
+        throw new Error('Conexão encerrada pelo servidor');
+      }
+    } catch (error: any) {
       if (this.controller?.signal.aborted) return;
-      console.error('SSE connection error:', error);
+      const message = error?.message ? String(error.message) : 'Falha de rede';
+      console.error('SSE connection error:', message);
+      useAppStore.getState().setConnectionError(message);
       useAppStore.getState().setConnectionStatus('error');
       this.scheduleReconnect();
     } finally {
@@ -161,47 +190,60 @@ class OpenCodeSSE {
   }
 
   private handleMessage(message: any) {
-    // Map real opencode SSE event types -> app state
+    const store = useAppStore.getState();
+
     switch (message?.type) {
       case 'server.connected':
+        store.setConnectionStatus('connected');
         break;
 
-      case 'session.created':
-        if (message.data) {
-          useAppStore.getState().addSession(message.data);
+      case 'session.created': {
+        const d = message.data;
+        if (d?.sessionID) {
+          store.addSession({
+            id: d.sessionID,
+            name: d.title ?? 'Nova sessão',
+            status: 'idle',
+            workingDirectory: d.location?.directory ?? '',
+            lastActivity: d.time?.updated ?? Date.now(),
+          });
         }
         break;
+      }
 
-      case 'session.updated':
-      case 'session.renamed':
-      case 'session.archived':
-        if (message.data?.session) {
-          useAppStore.getState().addSession(message.data.session);
+      case 'session.renamed': {
+        const d = message.data;
+        if (d?.sessionID && d?.title) {
+          store.updateSession(d.sessionID, { name: d.title });
         }
         break;
+      }
 
       case 'session.deleted':
         if (message.data?.sessionID) {
-          useAppStore.getState().removeSession?.(message.data.sessionID);
+          store.removeSession(message.data.sessionID);
         }
         break;
 
       case 'session.message.content.updated':
         if (message.data?.sessionID) {
-          useAppStore.getState().addMessage(message.data.sessionID, message.data);
+          store.addMessage(message.data.sessionID, message.data);
         }
         break;
 
-      case 'session.execution.succeeded':
       case 'session.execution.failed':
-        if (message.type === 'session.execution.failed') {
-          console.error('Execution failed:', message.data);
-        }
+        store.setConnectionError(
+          message.data?.error?.message ?? 'A execução falhou no servidor'
+        );
         break;
 
       case 'session.tool.success':
         if (message.data) {
-          useAppStore.getState().addTerminalOutput(message.data);
+          store.addTerminalOutput({
+            type: 'stdout',
+            data: typeof message.data === 'string' ? message.data : JSON.stringify(message.data),
+            timestamp: Date.now(),
+          });
         }
         break;
 
@@ -252,7 +294,7 @@ class OpenCodeSSE {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Basic ${auth.authToken}`,
+          Authorization: `Basic ${auth.authToken}`,
         },
         body: JSON.stringify({
           text: command,
@@ -284,11 +326,11 @@ class OpenCodeSSE {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Basic ${auth.authToken}`,
+          Authorization: `Basic ${auth.authToken}`,
         },
         body: JSON.stringify({
           title: name,
-          location: workingDirectory ? { path: workingDirectory } : undefined,
+          location: workingDirectory ? { directory: workingDirectory } : undefined,
         }),
       });
 
@@ -320,7 +362,7 @@ class OpenCodeSSE {
       const response = await fetch(`${auth.baseUrl}/api/fs/list?path=${encodeURIComponent(path)}`, {
         method: 'GET',
         headers: {
-          'Authorization': `Basic ${auth.authToken}`,
+          Authorization: `Basic ${auth.authToken}`,
         },
       });
 
@@ -329,7 +371,6 @@ class OpenCodeSSE {
         console.error('getFileTree failed:', response.status, errorText);
       } else {
         const data = await response.json();
-        // File tree will come via SSE or we can update directly
         if (data?.data) {
           useAppStore.getState().setFileTree(data.data);
         }
@@ -340,7 +381,7 @@ class OpenCodeSSE {
   }
 
   // Legacy methods for compatibility - now use HTTP
-  send(data: any) {
+  send(_data: any) {
     console.warn('send() is deprecated, use specific methods');
   }
 
@@ -353,7 +394,9 @@ class OpenCodeSSE {
     this.pairedSession = null;
     this.reconnectAttempts = 0;
     this.close();
-    useAppStore.getState().setConnectionStatus('disconnected');
+    const store = useAppStore.getState();
+    store.setConnectionError(null);
+    store.setConnectionStatus('disconnected');
   }
 
   private close() {

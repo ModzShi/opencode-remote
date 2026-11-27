@@ -12,6 +12,8 @@ interface AppState {
   // Connection
   connectionStatus: ConnectionStatus;
   setConnectionStatus: (status: ConnectionStatus) => void;
+  connectionError: string | null;
+  setConnectionError: (error: string | null) => void;
   pairedSession: PairingData | null;
   setPairedSession: (session: PairingData | null) => void;
   clearPairing: () => void;
@@ -78,9 +80,12 @@ export const useAppStore = create<AppState>()(
       // Connection
       connectionStatus: 'disconnected',
       setConnectionStatus: (status) => set({ connectionStatus: status }),
+      connectionError: null,
+      setConnectionError: (error) => set({ connectionError: error }),
       pairedSession: null,
       setPairedSession: (session) => set({ pairedSession: session }),
-      clearPairing: () => set({ pairedSession: null, connectionStatus: 'disconnected' }),
+      clearPairing: () =>
+        set({ pairedSession: null, connectionStatus: 'disconnected', connectionError: null }),
 
       // Sessions
       sessions: [],
