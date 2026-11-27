@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { memo, useEffect, useRef, useState } from 'react';
+import { AppState, StyleSheet, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { paletteAt, type Palette } from './palette';
 import { tickSignal } from './signal';
@@ -13,22 +13,18 @@ interface ParticleOrbProps {
   levelRef?: { current: number };
 }
 
-const COUNT = 620;
+const COUNT = 560;
 const TWO_PI = Math.PI * 2;
 const GOLDEN = Math.PI * (3 - Math.sqrt(5));
 const TONES = 6;
-const ALPHAS = 4;
+const ALPHAS = 2;
 const BUCKETS = TONES * ALPHAS;
 
 type Params = {
-  tempo: number;
-  spin: number;
   breathe: number;
   drift: number;
   ripple: number;
   swell: number;
-  flow: number;
-  swirl: number;
   pulse: number;
   ring: number;
   jitter: number;
@@ -36,14 +32,15 @@ type Params = {
   alpha: number;
 };
 
+// Sem giro e sem rotação: o orbe fica estático, só vibra com a voz.
 const STATES: Record<OrbState, Params> = {
-  idle: { tempo: 1, spin: 0.14, breathe: 0.05, drift: 1, ripple: 0, swell: 0.04, flow: 0, swirl: 0, pulse: 0, ring: 0, jitter: 0, shake: 0, alpha: 0.72 },
-  connecting: { tempo: 1, spin: 0.3, breathe: 0.02, drift: 0.2, ripple: 0, swell: 0, flow: 0, swirl: 0, pulse: 0.06, ring: 1, jitter: 0, shake: 0, alpha: 0.8 },
-  listening: { tempo: 1, spin: 0.55, breathe: 0.012, drift: 0, ripple: 1, swell: 0.12, flow: 0, swirl: 0, pulse: 0, ring: 0, jitter: 0, shake: 0, alpha: 0.92 },
-  thinking: { tempo: 1, spin: 0.32, breathe: 0.01, drift: 0, ripple: 0, swell: 0, flow: 0, swirl: 0, pulse: 1, ring: 0, jitter: 0, shake: 0, alpha: 0.78 },
-  speaking: { tempo: 1, spin: 0.24, breathe: 0.01, drift: 0, ripple: 0, swell: 0.06, flow: 1, swirl: 1, pulse: 0, ring: 0, jitter: 0.6, shake: 0, alpha: 0.94 },
-  error: { tempo: 1, spin: 0.08, breathe: 0, drift: 0, ripple: 0, swell: 0, flow: 0, swirl: 0, pulse: 0, ring: 0, jitter: 0.7, shake: 1, alpha: 0.85 },
-  disabled: { tempo: 0.04, spin: 0, breathe: 0, drift: 0, ripple: 0, swell: 0, flow: 0, swirl: 0, pulse: 0, ring: 0, jitter: 0, shake: 0, alpha: 0.45 },
+  idle: { breathe: 0.05, drift: 1, ripple: 0, swell: 0.04, pulse: 0, ring: 0, jitter: 0, shake: 0, alpha: 0.72 },
+  connecting: { breathe: 0.02, drift: 0.2, ripple: 0, swell: 0, pulse: 0.06, ring: 1, jitter: 0, shake: 0, alpha: 0.8 },
+  listening: { breathe: 0.012, drift: 0, ripple: 1, swell: 0.12, pulse: 0, ring: 0, jitter: 0, shake: 0, alpha: 0.92 },
+  thinking: { breathe: 0.01, drift: 0, ripple: 0, swell: 0, pulse: 1, ring: 0, jitter: 0, shake: 0, alpha: 0.78 },
+  speaking: { breathe: 0.01, drift: 0, ripple: 0, swell: 0.06, pulse: 0, ring: 0, jitter: 0.6, shake: 0, alpha: 0.94 },
+  error: { breathe: 0, drift: 0, ripple: 0, swell: 0, pulse: 0, ring: 0, jitter: 0.7, shake: 1, alpha: 0.85 },
+  disabled: { breathe: 0, drift: 0, ripple: 0, swell: 0, pulse: 0, ring: 0, jitter: 0, shake: 0, alpha: 0.45 },
 };
 
 const STATE_NAMES = Object.keys(STATES) as OrbState[];
@@ -97,13 +94,14 @@ function tonePalette(palette: Palette): string[] {
   );
 }
 
-export function ParticleOrb({ size, state, levelRef }: ParticleOrbProps) {
+function ParticleOrbInner({ size, state, levelRef }: ParticleOrbProps) {
   const paths = useRef<(React.ElementRef<typeof Path> | null)[]>([]);
   const stateRef = useRef<OrbState>(state);
   const weights = useRef<Record<string, number>>({});
   const current = useRef<Params>({ ...STATES.idle });
   const paletteRef = useRef(paletteAt(0));
   const [initialPalette] = useState(() => paletteAt(0));
+  const [mounts] = useState(() => Array.from({ length: BUCKETS }, (_, bucket) => bucket));
 
   useEffect(() => {
     stateRef.current = state;
@@ -117,26 +115,37 @@ export function ParticleOrb({ size, state, levelRef }: ParticleOrbProps) {
     weights.current = initial;
 
     let frameId = 0;
+    let running = true;
     const started = Date.now();
     let last = started;
-    let spinAngle = 0;
     let colourClock = 0;
     let frameMs = 16;
+    let skip = 0;
     const colours = tonePalette(paletteRef.current);
 
     const counts = new Uint16Array(BUCKETS);
     const chunks: string[] = new Array(BUCKETS).fill('');
 
     const loop = () => {
+      if (!running) return;
+      frameId = requestAnimationFrame(loop);
+
       const now = Date.now();
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
+      if (dt <= 0) return;
       const time = (now - started) / 1000;
+
+      frameMs = frameMs * 0.85 + dt * 1000 * 0.15;
+      // Em aparelhos que seguem o passo, desenha um frame sim, outro não.
+      const stride = frameMs > 30 ? 3 : frameMs > 20 ? 2 : 1;
+      skip += 1;
+      if (stride > 1 && skip % stride !== 0) return;
 
       STATE_NAMES.forEach((name) => {
         const want = name === stateRef.current ? 1 : 0;
         const rate = name === 'idle' || name === 'disabled' ? 5 : name === 'error' ? 10 : 14;
-        weights.current[name] = approach(weights.current[name] ?? 0, want, rate, dt);
+        weights.current[name] = approach(weights.current[name] ?? 0, want, rate, dt * stride);
       });
 
       for (let index = 0; index < KEYS.length; index += 1) {
@@ -146,27 +155,20 @@ export function ParticleOrb({ size, state, levelRef }: ParticleOrbProps) {
           const name = STATE_NAMES[stateIndex];
           target += (weights.current[name] ?? 0) * STATES[name][key];
         }
-        current.current[key] = approach(current.current[key], target, 12, dt);
+        current.current[key] = approach(current.current[key], target, 12, dt * stride);
       }
 
       const params = current.current;
-      spinAngle += params.spin * dt;
-      const sinSpin = Math.sin(spinAngle);
-      const cosSpin = Math.cos(spinAngle);
-
-      const amplitude = clamp01(Math.max(levelRef?.current ?? 0, tickSignal(dt) * 0.9));
+      const amplitude = clamp01(Math.max(levelRef?.current ?? 0, tickSignal(dt * stride) * 0.9));
       const breathe = 1 + params.breathe * Math.sin(time * 1.6);
       const shakeX = params.shake * Math.sin(time * 47) * 2;
       const shakeY = params.shake * Math.cos(time * 39) * 2;
       const baseScale = 62 * breathe;
 
-      frameMs = frameMs * 0.9 + dt * 1000 * 0.1;
-      const stride = frameMs > 27 ? 2 : 1;
-
       counts.fill(0);
       for (let bucket = 0; bucket < BUCKETS; bucket += 1) chunks[bucket] = '';
 
-      for (let index = 0; index < COUNT; index += stride) {
+      for (let index = 0; index < COUNT; index += 1) {
         const seed = seeds[index];
 
         let px = sphereX[index];
@@ -181,19 +183,7 @@ export function ParticleOrb({ size, state, levelRef }: ParticleOrbProps) {
           pz += (Math.sin(angle * 2 + time * 1.4) * 0.18 - pz) * ringW;
         }
 
-        if (params.flow > 0.01) {
-          pz += Math.sin(py * 3 + time * 2.2) * 0.14 * params.flow;
-        }
-
-        let rotatedX = px * cosSpin - pz * sinSpin;
-        const rotatedZ = px * sinSpin + pz * cosSpin;
-
-        if (params.swirl > 0.01) {
-          const swirl = params.swirl * 0.85 * (1 - Math.abs(rotatedZ)) * Math.sin(time * 0.9 + seed);
-          rotatedX = rotatedX * Math.cos(swirl) - py * Math.sin(swirl);
-        }
-
-        const perspective = 1 / (1.75 - rotatedZ * 0.45);
+        const perspective = 1 / (1.75 - pz * 0.45);
         const ripple =
           params.ripple * (0.2 + amplitude * 0.8) * Math.sin(seed * 3 + time * 6.5) +
           params.pulse * 0.13 * Math.sin(time * 2.6 + seed * 0.4);
@@ -201,37 +191,27 @@ export function ParticleOrb({ size, state, levelRef }: ParticleOrbProps) {
         const jitter = params.jitter * 0.035 * Math.sin(seed * 97 + time * 31);
         const radial = 1 + ripple * 0.45 + params.swell * 0.28 * Math.sin(time * 1.7 + seed) + jitter;
 
-        const screenX = 100 + (rotatedX + drift) * baseScale * radial * perspective + shakeX;
+        const screenX = 100 + (px + drift) * baseScale * radial * perspective + shakeX;
         const screenY = 100 + (py + drift) * baseScale * radial * perspective + shakeY;
 
-        const depth = (rotatedZ + 1) / 2;
+        const depth = (pz + 1) / 2;
         const dot = (0.7 + depth * 1.55) * (0.8 + amplitude * params.ripple * 1.1);
         const alpha = clamp01(params.alpha * (0.2 + depth * 0.9) * (0.5 + tones[index] * 0.5));
-        const alphaBucket = Math.min(ALPHAS - 1, Math.floor(alpha * ALPHAS));
-        const bucket = toneBucket[index] * ALPHAS + alphaBucket;
+        const bucket = toneBucket[index] * ALPHAS + (alpha > 0.55 ? 1 : 0);
         counts[bucket] += 1;
-        chunks[bucket] +=
-          'M' +
-          (screenX - dot).toFixed(1) +
-          ' ' +
-          screenY.toFixed(1) +
-          'a' +
-          dot.toFixed(1) +
-          ' ' +
-          dot.toFixed(1) +
-          ' 0 1 0 ' +
-          (dot * 2).toFixed(1) +
-          ' 0a' +
-          dot.toFixed(1) +
-          ' ' +
-          dot.toFixed(1) +
-          ' 0 1 0 ' +
-          (-dot * 2).toFixed(1) +
-          ' 0';
+
+        // Coordenadas em meio pixel: barato de formatar e sem tremor visível.
+        const xi = Math.round(screenX * 2) / 2;
+        const yi = Math.round(screenY * 2) / 2;
+        const ri = Math.round(dot * 2) / 2;
+        const d2 = ri * 2;
+        chunks[bucket] =
+          chunks[bucket] +
+          'M' + (xi - ri) + ' ' + yi + 'a' + ri + ' ' + ri + ' 0 1 0 ' + d2 + ' 0a' + ri + ' ' + ri + ' 0 1 0 ' + (-d2) + ' 0';
       }
 
-      colourClock += dt;
-      const colourChanged = colourClock > 0.25;
+      colourClock += dt * stride;
+      const colourChanged = colourClock > 0.3;
       if (colourChanged) {
         colourClock = 0;
         paletteRef.current = paletteAt(time);
@@ -244,41 +224,54 @@ export function ParticleOrb({ size, state, levelRef }: ParticleOrbProps) {
         if (!node) continue;
         const data = counts[bucket] > 0 ? chunks[bucket] : 'M0 0';
         if (colourChanged) {
-          node.setNativeProps({ d: data, fill: colours[Math.floor(bucket / ALPHAS)] });
+          node.setNativeProps({ d: data, fill: colours[bucket >> 1] });
         } else {
           node.setNativeProps({ d: data });
         }
       }
-
-      frameId = requestAnimationFrame(loop);
     };
 
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        if (!running) {
+          running = true;
+          last = Date.now();
+          frameId = requestAnimationFrame(loop);
+        }
+      } else {
+        running = false;
+        cancelAnimationFrame(frameId);
+      }
+    });
+
     frameId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(frameId);
+    return () => {
+      running = false;
+      subscription.remove();
+      cancelAnimationFrame(frameId);
+    };
   }, [levelRef]);
 
   return (
     <View style={[styles.container, { width: size, height: size }]}>
       <Svg width={size} height={size} viewBox="0 0 200 200">
-        {Array.from({ length: BUCKETS }).map((_, bucket) => {
-          const tone = Math.floor(bucket / ALPHAS);
-          const alpha = (bucket % ALPHAS) / ALPHAS + 0.25;
-          return (
-            <Path
-              key={`bucket-${bucket}`}
-              ref={(node) => {
-                paths.current[bucket] = node;
-              }}
-              d="M0 0"
-              fill={mixHex(initialPalette.core, initialPalette.glow, tone / (TONES - 1))}
-              fillOpacity={alpha}
-            />
-          );
-        })}
+        {mounts.map((bucket) => (
+          <Path
+            key={`bucket-${bucket}`}
+            ref={(node) => {
+              paths.current[bucket] = node;
+            }}
+            d="M0 0"
+            fill={mixHex(initialPalette.core, initialPalette.glow, (bucket >> 1) / (TONES - 1))}
+            fillOpacity={bucket % ALPHAS === 0 ? 0.42 : 0.82}
+          />
+        ))}
       </Svg>
     </View>
   );
 }
+
+export const ParticleOrb = memo(ParticleOrbInner);
 
 const styles = StyleSheet.create({
   container: { alignItems: 'center', justifyContent: 'center' },

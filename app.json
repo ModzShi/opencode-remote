@@ -1,61 +1,62 @@
 {
-  "expo": {
-    "name": "OpenCode Remote",
-    "slug": "opencode-remote",
-    "version": "1.0.2",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "automatic",
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.opencode.remote",
-      "buildNumber": "3",
-      "infoPlist": {
-        "NSLocalNetworkUsageDescription": "OpenCode Remote precisa acessar a rede local para conectar ao seu PC",
-        "NSBonjourServices": [
-          "_opencode._tcp"
-        ],
-        "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "OpenCode Remote usa a câmera para escanear o QR Code de pareamento do OpenCode",
-        "NSMicrophoneUsageDescription": "OpenCode Remote usa o microfone para o Rafael ouvir sua voz"
-      }
-    },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0a0a0f"
-      },
-      "package": "com.opencode.remote"
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    },
-    "plugins": [
-      "expo-router",
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "OpenCode Remote usa a câmera para escanear o QR Code de pareamento do OpenCode."
-        }
-      ],
-      [
-        "expo-splash-screen",
-        {
-          "image": "./assets/splash.png",
-          "resizeMode": "contain",
-          "backgroundColor": "#0a0a0f"
-        }
-      ],
-      "expo-audio"
-    ],
-    "cli": {
-      "appVersionSource": "local"
-    },
-    "scheme": "opencode-remote",
-    "extra": {
-      "router": {
-        "origin": false
-      }
-    }
-  }
+    "expo":  {
+                 "name":  "OpenCode Remote",
+                 "slug":  "opencode-remote",
+                 "version":  "1.0.3",
+                 "orientation":  "portrait",
+                 "icon":  "./assets/icon.png",
+                 "userInterfaceStyle":  "automatic",
+                 "ios":  {
+                             "supportsTablet":  true,
+                             "bundleIdentifier":  "com.opencode.remote",
+                             "buildNumber":  "4",
+                             "infoPlist":  {
+                                               "NSLocalNetworkUsageDescription":  "OpenCode Remote precisa acessar a rede local para conectar ao seu PC",
+                                               "NSBonjourServices":  [
+                                                                         "_opencode._tcp"
+                                                                     ],
+                                               "ITSAppUsesNonExemptEncryption":  false,
+                                               "NSCameraUsageDescription":  "OpenCode Remote usa a câmera para escanear o QR Code de pareamento do OpenCode",
+                                               "NSMicrophoneUsageDescription":  "OpenCode Remote usa o microfone para o Rafael ouvir sua voz"
+                                           }
+                         },
+                 "android":  {
+                                 "adaptiveIcon":  {
+                                                      "foregroundImage":  "./assets/adaptive-icon.png",
+                                                      "backgroundColor":  "#0a0a0f"
+                                                  },
+                                 "package":  "com.opencode.remote"
+                             },
+                 "web":  {
+                             "favicon":  "./assets/favicon.png"
+                         },
+                 "plugins":  [
+                                 "expo-router",
+                                 [
+                                     "expo-camera",
+                                     {
+                                         "cameraPermission":  "OpenCode Remote usa a câmera para escanear o QR Code de pareamento do OpenCode."
+                                     }
+                                 ],
+                                 [
+                                     "expo-splash-screen",
+                                     {
+                                         "image":  "./assets/splash.png",
+                                         "resizeMode":  "contain",
+                                         "backgroundColor":  "#0a0a0f"
+                                     }
+                                 ],
+                                 "expo-audio"
+                             ],
+                 "cli":  {
+                             "appVersionSource":  "local"
+                         },
+                 "scheme":  "opencode-remote",
+                 "extra":  {
+                               "router":  {
+                                              "origin":  false
+                                          }
+                           }
+             }
 }
+

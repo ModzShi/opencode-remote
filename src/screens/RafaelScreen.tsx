@@ -1,10 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Animated,
   Dimensions,
   Keyboard,
   KeyboardAvoidingView,
-  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -48,12 +46,6 @@ function normalize(value: string): string {
     .trim();
 }
 
-function distance(a: { pageX: number; pageY: number }, b: { pageX: number; pageY: number }): number {
-  return Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY);
-}
-
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-
 export function RafaelScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -68,11 +60,6 @@ export function RafaelScreen() {
   const [writing, setWriting] = useState(false);
   const [sending, setSending] = useState(false);
 
-  const scale = useMemo(() => new Animated.Value(1), []);
-  const scaleValue = useRef(1);
-  const pinchStart = useRef(0);
-  const pinchBase = useRef(1);
-  const moved = useRef(false);
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const micLevel = useRef(0);
   const lastSpoken = useRef('');
@@ -114,6 +101,14 @@ export function RafaelScreen() {
     if (mine) return mine;
     return 'Estou aqui. Fale ou digite, e eu conduzo o resto.';
   }, [draft, lastAssistant, lastUser, sending, writing]);
+
+  // O texto chega em fluxo: agrupa as atualizações para o texto não custar caro.
+  const [shownSubtitle, setShownSubtitle] = useState(subtitle);
+  useEffect(() => {
+    if (subtitle === shownSubtitle) return;
+    const id = setTimeout(() => setShownSubtitle(subtitle), 90);
+    return () => clearTimeout(id);
+  }, [shownSubtitle, subtitle]);
 
   useEffect(() => {
     if (!activeSessionId) return;
@@ -181,49 +176,9 @@ export function RafaelScreen() {
     Keyboard.dismiss();
   }, [activeSessionId, close, draft]);
 
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization
-  const panResponder = useMemo(
-    () =>
-      // Os handlers rodam fora do render; a regra não distingue isso.
-      // eslint-disable-next-line react-hooks/refs
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: (event) => {
-          moved.current = false;
-          const touches = event.nativeEvent.touches;
-          if (touches.length >= 2) {
-            pinchStart.current = distance(touches[0], touches[1]);
-            pinchBase.current = scaleValue.current;
-          } else {
-            pinchStart.current = 0;
-          }
-        },
-        onPanResponderMove: (event) => {
-          const touches = event.nativeEvent.touches;
-          if (touches.length < 2) return;
-          const spread = distance(touches[0], touches[1]);
-          if (pinchStart.current === 0) {
-            pinchStart.current = spread;
-            pinchBase.current = scaleValue.current;
-            return;
-          }
-          const ratio = spread / pinchStart.current;
-          const next = clamp(pinchBase.current * ratio, 0.55, 2.2);
-          scaleValue.current = next;
-          moved.current = true;
-          scale.setValue(next);
-        },
-        onPanResponderRelease: () => {
-          pinchStart.current = 0;
-          if (!moved.current) openInput();
-        },
-        onPanResponderTerminate: () => {
-          pinchStart.current = 0;
-        },
-      }),
-    [openInput, scale]
-  );
+  const handleLevel = useCallback((value: number) => {
+    micLevel.current = value;
+  }, []);
 
   const orbSize = Math.min(Dimensions.get('window').width * 0.86, 380);
   const statusLabel =
@@ -243,9 +198,7 @@ export function RafaelScreen() {
       {MicBridge ? (
         <MicBridge
           enabled={writing}
-          onLevel={(value) => {
-            micLevel.current = value;
-          }}
+          onLevel={handleLevel}
         />
       ) : null}
 
@@ -264,19 +217,17 @@ export function RafaelScreen() {
         style={styles.body}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.orbArea} {...panResponder.panHandlers}>
-          <Animated.View style={{ transform: [{ scale }] }}>
-            <ParticleOrb size={orbSize} state={orbState} levelRef={micLevel} />
-          </Animated.View>
-        </View>
+        <Pressable style={styles.orbArea} onPress={openInput}>
+          <ParticleOrb size={orbSize} state={orbState} levelRef={micLevel} />
+        </Pressable>
 
         <View style={styles.captionArea}>
-          <Text numberOfLines={5} adjustsFontSizeToFit style={styles.caption}>
-            {subtitle}
+          <Text numberOfLines={5} style={styles.caption}>
+            {shownSubtitle}
           </Text>
           {!writing ? (
             <Text style={styles.hint}>
-              toque para falar  ·  aproxime com dois dedos
+              toque para falar
             </Text>
           ) : null}
         </View>
