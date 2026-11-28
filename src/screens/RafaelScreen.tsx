@@ -61,8 +61,9 @@ function parseModelIntent(text: string): ModelIntent | null {
   const value = normalize(text);
   if (!value.includes('modelo')) return null;
 
+  // Pergunta sobre o modelo só quando a frase começa perguntando.
   if (
-    /(qual|quais|que)\s+(e\s+)?(o\s+)?(seu\s+)?modelo/.test(value) ||
+    /^(qual|quais|que|diz|diga|fala|fale|me\s+diz|me\s+fala)\b[^?]{0,48}\bmodelo\b/.test(value) ||
     /modelo\s+(voce\s+)?(esta|ta)\s+(usando|usa)/.test(value)
   ) {
     return { kind: 'query' };
