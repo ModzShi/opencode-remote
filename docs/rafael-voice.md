@@ -1,6 +1,6 @@
 # Voz do Rafael
 
-Estado atual (v1.2.1): microfone, ditado, voz na nuvem e escolha do modelo já vão
+Estado atual (v1.2.2): microfone, ditado, voz na nuvem e escolha do modelo já vão
 compilados no `.ipa` pelo workflow de CI (`macos-26` + prebuild + archive).
 
 ## Como funciona
