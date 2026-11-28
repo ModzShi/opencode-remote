@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Dimensions,
   Keyboard,
   KeyboardAvoidingView,
@@ -13,11 +14,13 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowUp, Keyboard as KeyboardIcon, X } from 'lucide-react-native';
+import { ArrowUp, ChevronDown, Keyboard as KeyboardIcon, Sparkles, X } from 'lucide-react-native';
 import { useAppStore } from '@/store';
 import { websocket } from '@/utils/websocket';
 import { haptic } from '@/utils/haptics';
-import { OrbView, type OrbState } from '@/rafael/OrbView';
+import { Orb, findOrbStyle, type OrbState } from '@/rafael/Orb';
+import { refreshModels, useModels } from '@/rafael/models';
+import { ModelSheet } from '@/components/ModelSheet';
 import { speak, stopSpeaking, voiceReady } from '@/rafael/voice';
 
 // A escuta nativa só existe se o binário tiver o módulo instalado.
@@ -34,7 +37,7 @@ const VoiceListener = (() => {
 
 const EXIT_WORDS = ['sair do modo rafael', 'sair do modo', 'desligar rafael', 'fechar rafael'];
 const LISTEN_TIMEOUT = 20000;
-const SEND_DELAY = 700;
+const SEND_DELAY = 220;
 
 function normalize(value: string): string {
   return value
@@ -57,8 +60,12 @@ export function RafaelScreen() {
   const storedMessages = useAppStore((state) => (state.activeSessionId ? state.messages[state.activeSessionId] : undefined));
   const messages = useMemo(() => storedMessages ?? [], [storedMessages]);
   const connectionStatus = useAppStore((state) => state.connectionStatus);
-  const orbVariant = useAppStore((state) => state.settings.rafaelOrb);
+  const orbStyle = findOrbStyle(useAppStore((state) => state.settings.rafaelOrb));
+  const colorFrom = useAppStore((state) => state.settings.rafaelColorFrom) ?? '#7EE7FF';
+  const colorTo = useAppStore((state) => state.settings.rafaelColorTo) ?? '#9D8BFF';
+  const cycle = useAppStore((state) => state.settings.rafaelColorCycle) ?? true;
   const agentModel = useAppStore((state) => state.settings.rafaelAgentModel);
+  const setSettings = useAppStore((state) => state.setSettings);
 
   const [draft, setDraft] = useState('');
   const [writing, setWriting] = useState(false);
@@ -66,6 +73,9 @@ export function RafaelScreen() {
   const [heard, setHeard] = useState('');
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [modelSheet, setModelSheet] = useState(false);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const models = useModels(connectionStatus === 'connected');
 
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const micLevel = useRef(0);
@@ -315,6 +325,25 @@ export function RafaelScreen() {
     await send(text);
   }, [closeInput, draft, send]);
 
+  const chosenModel = models.find((model) => model.value === agentModel);
+  const modelLabel = agentModel ? chosenModel?.label ?? agentModel : 'modelo padrão';
+
+  const openModels = useCallback(() => {
+    haptic('light');
+    setModelSheet(true);
+    setModelsLoading(true);
+    void refreshModels(true).finally(() => setModelsLoading(false));
+  }, []);
+
+  const selectModel = useCallback(
+    (value: string) => {
+      haptic('tap');
+      setSettings({ rafaelAgentModel: value });
+      setModelSheet(false);
+    },
+    [setSettings]
+  );
+
   const orbSize = Math.min(Dimensions.get('window').width * 0.82, 340);
   const statusLabel = !VoiceListener
     ? 'sem ditado'
@@ -354,7 +383,15 @@ export function RafaelScreen() {
 
       <View style={styles.body}>
         <Pressable style={styles.orbArea} onPress={toggleListening}>
-          <OrbView size={orbSize} state={orbState} variant={orbVariant} levelRef={micLevel} />
+          <Orb
+            size={orbSize}
+            state={orbState}
+            style={orbStyle}
+            colorFrom={colorFrom}
+            colorTo={colorTo}
+            cycle={cycle}
+            levelRef={micLevel}
+          />
         </Pressable>
 
         <View style={styles.captionArea}>
@@ -363,6 +400,14 @@ export function RafaelScreen() {
           </Text>
           {!writing && !listening ? <Text style={styles.hint}>toque para falar</Text> : null}
         </View>
+
+        <Pressable onPress={openModels} style={styles.modelChip} hitSlop={8}>
+          <Sparkles size={12} color="#8a8f9c" strokeWidth={2.2} />
+          <Text numberOfLines={1} style={styles.modelLabel}>
+            {modelLabel}
+          </Text>
+          <ChevronDown size={13} color="#6b6b6b" strokeWidth={2.4} />
+        </Pressable>
 
         {writing ? (
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -396,6 +441,32 @@ export function RafaelScreen() {
           </View>
         )}
       </View>
+
+      <ModelSheet
+        visible={modelSheet}
+        selected={agentModel ?? ''}
+        models={models}
+        loading={modelsLoading}
+        onSelect={selectModel}
+        onManual={() => {
+          if (Platform.OS !== 'ios') return;
+          Alert.prompt(
+            'Modelo do OpenCode',
+            'Ex.: anthropic/claude-sonnet-4. Deixe vazio para o padrão do agente.',
+            (value) => {
+              setSettings({ rafaelAgentModel: value.trim() });
+              setModelSheet(false);
+            },
+            'plain-text',
+            agentModel ?? ''
+          );
+        }}
+        onRefresh={() => {
+          setModelsLoading(true);
+          void refreshModels(true).finally(() => setModelsLoading(false));
+        }}
+        onClose={() => setModelSheet(false)}
+      />
     </View>
   );
 }
@@ -433,6 +504,21 @@ const styles = StyleSheet.create({
     marginTop: 14,
     textTransform: 'uppercase',
   },
+  modelChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 7,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
+    marginBottom: 10,
+    maxWidth: '78%',
+  },
+  modelLabel: { color: '#9a9a9a', fontSize: 11.5, fontWeight: '600', maxWidth: 220 },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',

@@ -2,7 +2,7 @@
   "expo": {
     "name": "OpenCode Remote",
     "slug": "opencode-remote",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -10,7 +10,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.opencode.remote",
-      "buildNumber": "7",
+      "buildNumber": "8",
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "OpenCode Remote precisa acessar a rede local para conectar ao seu PC",
         "NSBonjourServices": [

@@ -1,3 +1,13 @@
+export interface ModelOption {
+  /** provider/model — o que vai no prompt. */
+  value: string;
+  /** nome amigável para mostrar. */
+  label: string;
+  provider: string;
+  /** true quando é o modelo padrão do servidor. */
+  isDefault?: boolean;
+}
+
 export interface OpenCodeSession {
   id: string;
   name: string;
@@ -82,7 +92,12 @@ export interface AppSettings {
   /** Modelo de TTS do Fish (s2.1-pro-free, s2-pro, s1...). */
   rafaelTtsModel?: string;
   /** Estilo do orbe (id do catálogo de orbes). */
+  /** 'particles' (original) | 'siri' | 'mercury' */
   rafaelOrb?: string;
+  rafaelColorFrom?: string;
+  rafaelColorTo?: string;
+  /** true = o orbe troca de cor sozinho; false = usa as duas cores escolhidas. */
+  rafaelColorCycle?: boolean;
   /** Resumo falado quando a resposta é longa. */
   rafaelSummary?: 'auto' | 'full' | 'off';
   /** Modelo do agente usado no Rafael (enviado junto com o prompt). */

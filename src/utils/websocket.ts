@@ -1,6 +1,6 @@
 import { useAppStore } from '@/store';
 import { pushEnergy } from '@/rafael/signal';
-import { MessagePart, OpenCodeMessage, OpenCodeSession, PairingData } from '@/types';
+import { MessagePart, ModelOption, OpenCodeMessage, OpenCodeSession, PairingData } from '@/types';
 import { basicAuthHeader } from './base64';
 import { buildSseEndpoint, exchangePairingCode } from './pairing';
 
@@ -550,7 +550,7 @@ class OpenCodeSSE {
     }, delay);
   }
 
-  private async request(path: string, init?: RequestInit): Promise<any | null> {
+  private async request(path: string, init?: RequestInit, quiet = false): Promise<any | null> {
     const auth = this.pairedSession ? getAuthInfo(this.pairedSession) : null;
     if (!auth) return null;
 
@@ -565,7 +565,9 @@ class OpenCodeSSE {
 
       if (!response.ok) {
         const detail = await response.text().catch(() => '');
-        console.error(`[opencode] ${init?.method ?? 'GET'} ${path} → ${response.status}`, detail.slice(0, 200));
+        if (!quiet) {
+          console.error(`[opencode] ${init?.method ?? 'GET'} ${path} → ${response.status}`, detail.slice(0, 200));
+        }
         return null;
       }
 
@@ -576,6 +578,22 @@ class OpenCodeSSE {
     }
   }
 
+
+  /**
+   * Lista os modelos que o OpenCode do PC tem instalados.
+   * O bridge expõe /api/*; tentamos os caminhos conhecidos do servidor e
+   * aceitamos formatos diferentes (providers[], all[], mapa de modelos).
+   */
+  async fetchModels(): Promise<ModelOption[]> {
+    const paths = ['/api/config/providers', '/api/provider', '/api/config', '/api/model'];
+    for (const path of paths) {
+      const payload = await this.request(path, undefined, true);
+      if (!payload) continue;
+      const models = normalizeModels(payload);
+      if (models.length > 0) return models;
+    }
+    return [];
+  }
   /** Lista as sessões do servidor e ativa a mais recente. */
   async fetchSessions(): Promise<void> {
     const payload = await this.request('/api/session');
@@ -804,4 +822,71 @@ class OpenCodeSSE {
   }
 }
 
+
+/** Aceita os formatos de /config/providers, /provider, /config e /model. */
+function normalizeModels(payload: any): ModelOption[] {
+  const data = payload?.data ?? payload;
+  const out: ModelOption[] = [];
+  const seen = new Set<string>();
+
+  const addProvider = (providerId: string, providerName: string, models: any) => {
+    if (!models) return;
+    const entries: [string, any][] = Array.isArray(models)
+      ? models.map((model: any) =>
+          typeof model === 'string'
+            ? ([model, model] as [string, any])
+            : ([String(model?.id ?? model?.name ?? ''), model] as [string, any])
+        )
+      : Object.entries(models);
+
+    for (const [rawId, model] of entries) {
+      if (!rawId) continue;
+      const id = rawId.includes('/') || !providerId ? rawId : `${providerId}/${rawId}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({
+        value: id,
+        label: String(typeof model === 'string' ? model : model?.name ?? model?.title ?? rawId),
+        provider: providerName || providerId || 'openCode',
+      });
+    }
+  };
+
+  const providers = data?.providers ?? data?.all ?? data?.provider ?? data;
+
+  if (Array.isArray(providers)) {
+    for (const provider of providers) {
+      if (!provider) continue;
+      if (typeof provider === 'string') {
+        // formato ["anthropic/claude", ...]
+        if (!seen.has(provider)) {
+          seen.add(provider);
+          out.push({ value: provider, label: provider, provider: 'openCode' });
+        }
+        continue;
+      }
+      addProvider(
+        String(provider.id ?? provider.name ?? ''),
+        String(provider.name ?? provider.id ?? ''),
+        provider.models
+      );
+    }
+  } else if (providers && typeof providers === 'object') {
+    for (const [providerId, provider] of Object.entries<any>(providers)) {
+      addProvider(providerId, String(provider?.name ?? providerId), provider?.models ?? provider);
+    }
+  }
+
+  if (out.length === 0 && Array.isArray(data?.models)) {
+    for (const model of data.models) {
+      if (!model) continue;
+      const id = String(model.id ?? model.value ?? '');
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push({ value: id, label: String(model.name ?? model.label ?? id), provider: String(model.provider ?? 'openCode') });
+    }
+  }
+
+  return out.sort((a, b) => a.provider.localeCompare(b.provider) || a.label.localeCompare(b.label));
+}
 export const websocket = new OpenCodeSSE();

@@ -95,6 +95,9 @@ const defaultSettings: AppSettings = {
   rafaelVoiceName: undefined,
   rafaelTtsModel: 's2.1-pro-free',
   rafaelOrb: 'particles',
+  rafaelColorFrom: '#7EE7FF',
+  rafaelColorTo: '#9D8BFF',
+  rafaelColorCycle: true,
   rafaelSummary: 'auto',
   rafaelAgentModel: '',
 };

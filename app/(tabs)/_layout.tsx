@@ -2,7 +2,7 @@ import { Tabs } from 'expo-router';
 import { StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/useTheme';
-import { MessageSquare, Orbit, Settings, Wifi } from 'lucide-react-native';
+import { MessageSquare, Settings, Wifi } from 'lucide-react-native';
 
 export default function TabsLayout() {
   const { colors, isDark } = useTheme();
@@ -41,15 +41,6 @@ export default function TabsLayout() {
           title: 'Chat',
           tabBarIcon: ({ focused, color }) => (
             <MessageSquare size={21} color={color} strokeWidth={focused ? 2.4 : 1.9} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="orbs"
-        options={{
-          title: 'Orbes',
-          tabBarIcon: ({ focused, color }) => (
-            <Orbit size={21} color={color} strokeWidth={focused ? 2.4 : 1.9} />
           ),
         }}
       />

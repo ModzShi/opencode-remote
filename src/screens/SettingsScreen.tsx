@@ -12,24 +12,24 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import { useTheme } from '@/hooks/useTheme';
 import { useAppStore } from '@/store';
 import { Button, Card } from '@/components/ui';
 import { VoicePicker } from '@/components/VoicePicker';
-import { FISH_VOICES, findVoice } from '@/rafael/voices';
-import { findOrb } from '@/rafael/orbs';
+import { FISH_VOICES, voiceLabel } from '@/rafael/voices';
+import { findOrbStyle, ORB_STYLES, Orb, type OrbStyle } from '@/rafael/Orb';
+import { OrbPicker } from '@/components/OrbPicker';
+import { ColorSheet } from '@/components/ColorSheet';
 import {
   Check,
+  ChevronRight,
   Copy,
   Globe,
   Info,
   Monitor,
   Moon,
-  Orbit,
   RotateCcw,
-  Sparkles,
   Sun,
   Trash2,
 } from 'lucide-react-native';
@@ -60,7 +60,6 @@ const SUMMARY_MODES: { value: 'auto' | 'full' | 'off'; label: string }[] = [
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const { colors } = useTheme();
 
   const settings = useAppStore((state) => state.settings);
@@ -74,7 +73,14 @@ export default function SettingsScreen() {
   const outputCount = useAppStore((state) => state.terminalOutput.length);
 
   const [copied, setCopied] = useState(false);
+  const orbStyle = findOrbStyle(settings.rafaelOrb);
+  const colorFrom = settings.rafaelColorFrom ?? '#7EE7FF';
+  const colorTo = settings.rafaelColorTo ?? '#9D8BFF';
+  const cycle = settings.rafaelColorCycle ?? true;
+
   const [voicePicker, setVoicePicker] = useState(false);
+  const [orbPicker, setOrbPicker] = useState(false);
+  const [colorSheet, setColorSheet] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const changeFontSize = (delta: number) => {
@@ -261,7 +267,7 @@ export default function SettingsScreen() {
           onPress={() => setVoicePicker(true)}
           right={
             <Text style={[styles.valueText, { color: colors.primary }]}>
-              {findVoice(settings.rafaelVoiceId).name}
+              {voiceLabel(settings.rafaelVoiceId)}
             </Text>
           }
         />
@@ -298,39 +304,33 @@ export default function SettingsScreen() {
 
         <Row
           label="Orbe"
-          hint="Forma do Rafael em modo voz"
-          onPress={() => router.push('/(tabs)/orbs')}
+          hint={ORB_STYLES.find((item) => item.id === orbStyle)?.name ?? 'Partículas'}
+          onPress={() => setOrbPicker(true)}
           right={
             <View style={styles.valueRow}>
-              <Text style={[styles.valueText, { color: colors.mutedForeground }]}>
-                {findOrb(settings.rafaelOrb).name}
-              </Text>
-              <Orbit size={16} color={colors.mutedForeground} />
+              <Orb
+                size={34}
+                state="speaking"
+                style={orbStyle}
+                colorFrom={colorFrom}
+                colorTo={colorTo}
+                cycle={cycle}
+                animate={false}
+              />
+              <ChevronRight size={16} color={colors.mutedForeground} />
             </View>
           }
         />
 
         <Row
-          label="Modelo do agente"
-          hint="Enviado junto com o prompt (opcional)"
-          onPress={() =>
-            Alert.prompt(
-              'Modelo do agente',
-              'Ex.: anthropic/claude-sonnet-4. Deixe vazio para usar o padrão do PC.',
-              (value) => setSettings({ rafaelAgentModel: value.trim() }),
-              'plain-text',
-              settings.rafaelAgentModel ?? ''
-            )
-          }
+          label="Cores do orbe"
+          hint={cycle ? 'Paleta viva (troca sozinha)' : 'Duas cores fixas'}
+          onPress={() => setColorSheet(true)}
           right={
             <View style={styles.valueRow}>
-              <Text
-                numberOfLines={1}
-                style={[styles.valueText, { color: colors.mutedForeground, maxWidth: 150 }]}
-              >
-                {settings.rafaelAgentModel || 'padrão'}
-              </Text>
-              <Sparkles size={16} color={colors.mutedForeground} />
+              <View style={[styles.colorDot, { backgroundColor: colorFrom }]} />
+              <View style={[styles.colorDot, { backgroundColor: colorTo, marginLeft: -5 }]} />
+              <ChevronRight size={16} color={colors.mutedForeground} />
             </View>
           }
           last
@@ -419,6 +419,28 @@ export default function SettingsScreen() {
           last
         />
       </Section>
+
+      <OrbPicker
+        visible={orbPicker}
+        value={orbStyle}
+        colorFrom={colorFrom}
+        colorTo={colorTo}
+        cycle={cycle}
+        onSelect={(style: OrbStyle) => setSettings({ rafaelOrb: style })}
+        onClose={() => setOrbPicker(false)}
+      />
+
+      <ColorSheet
+        visible={colorSheet}
+        orb={orbStyle}
+        colorFrom={colorFrom}
+        colorTo={colorTo}
+        cycle={cycle}
+        onChangeFrom={(color) => setSettings({ rafaelColorFrom: color })}
+        onChangeTo={(color) => setSettings({ rafaelColorTo: color })}
+        onChangeCycle={(value) => setSettings({ rafaelColorCycle: value })}
+        onClose={() => setColorSheet(false)}
+      />
 
       <VoicePicker
         visible={voicePicker}
@@ -689,6 +711,7 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontWeight: '600',
   },
+  colorDot: { width: 14, height: 14, borderRadius: 7, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.25)' },
   valueRow: {
     flexDirection: 'row',
     alignItems: 'center',
