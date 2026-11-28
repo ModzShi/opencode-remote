@@ -1,6 +1,6 @@
 # Voz do Rafael
 
-Estado atual (v1.2.3): microfone, ditado, voz na nuvem e escolha do modelo já vão
+Estado atual (v1.2.4): microfone, ditado, voz na nuvem e escolha do modelo já vão
 compilados no `.ipa` pelo workflow de CI (`macos-26` + prebuild + archive).
 
 ## Como funciona
@@ -31,6 +31,13 @@ Se o microfone for negado, mostra o aviso e volta para o teclado.
 - Endpoint: `POST https://api.fish.audio/v1/tts`, modelo `s2.1-pro-free` (grátis).
 - A chave **não** fica no repositório: secret `FISH_API_KEY` do GitHub → `EXPO_PUBLIC_FISH_API_KEY`.
 - Sem chave, cai na voz nativa do iOS (`expo-speech`, pt-BR).
+- **Velocidade e volume**: o Fish aceita `prosody: { speed, volume, normalize_loudness }`.
+  O padrão do app ficou **1,12x** e **+6 dB** (era 1x e 0 dB, que saía baixo e lento
+  no alto-falante do iPhone). Em **Ajustes → Rafael** dá para escolher de 1x a 1,4x e
+  de 0 a +14 dB; a voz nativa do iOS usa a mesma velocidade.
+- O player sempre toca com volume 1 e o modo de áudio volta para alto-falante
+  (`allowsRecording: false`, `shouldRouteThroughEarpiece: false`) antes de falar,
+  senão o iOS continua no modo de gravação e o som sai no fone de ouvido.
 - Ajustes → **Rafael**: 95 vozes em português do Fish (`src/rafael/voices.ts`,
   todas as que o catálogo público tem, ordenadas por popularidade), modelo de voz
   (`s2.1-pro-free`, `s2-pro`, `s1`) e o modo de resposta falada.
@@ -64,8 +71,9 @@ Violeta, Gelo, Fogo, Menta, Rosa, Ouro, Prata).
 
 ## Modelo do OpenCode
 
-Acima do campo de escrita existe a pílula do modelo. Ao tocar, o app lê o catálogo
-real do PC:
+Acima do campo de escrita existe a pílula do modelo — no **Rafael** e também no
+**chat** (Terminal), então dá para trocar de modelo sem entrar no modo de voz. Ao
+tocar, o app lê o catálogo real do PC:
 
 - `GET /api/model` — modelos disponíveis (`{ data: Model.Info[] }`, com
   `providerID` + `id`); nomes de provedor vêm de `GET /api/provider`;
@@ -114,7 +122,8 @@ Sem isso, o agente não conclui a tarefa e o modelo responde que não tem acesso
 | Rafael falando em voz alta | sim (Fish; fallback iOS) |
 | Escolha da voz e do modelo de voz | sim (Ajustes) |
 | Escolha do orbe e das cores | sim (Ajustes) |
-| Escolha do modelo do OpenCode | sim (pílula acima do campo; lista real do PC) |
+| Escolha do modelo do OpenCode | sim (pílula no Rafael e no chat; lista real do PC) |
+| Velocidade e volume da voz | sim (Ajustes → Rafael) |
 | Troca de modelo por voz | sim |
 | Aprovar permissões por voz | sim ("sim"/"não") |
 | Resumo automático de respostas longas | sim |

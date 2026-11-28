@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Animated,
   FlatList,
   KeyboardAvoidingView,
@@ -16,16 +17,18 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
-import { ChevronDown, Download, Plus, QrCode, RefreshCw, Sparkles } from 'lucide-react-native';
+import { ChevronDown, Cpu, Download, Plus, QrCode, RefreshCw, Sparkles } from 'lucide-react-native';
 import { useTheme } from '@/hooks/useTheme';
 import { useAppStore } from '@/store';
 import { websocket } from '@/utils/websocket';
 import { haptic } from '@/utils/haptics';
 import { basename, formatCount } from '@/utils/format';
 import { checkForUpdate } from '@/utils/updates';
-import { OpenCodeMessage } from '@/types';
+import { AgentOption, ModelOption, OpenCodeMessage } from '@/types';
 import { MessageItem } from '@/components/MessageItem';
 import { Composer } from '@/components/Composer';
+import { ModelSheet } from '@/components/ModelSheet';
+import { getDefaultModel, getModelProbe, refreshModels, useModels } from '@/rafael/models';
 import { SessionPicker } from '@/components/SessionPicker';
 import { radius, space } from '@/theme';
 
@@ -76,7 +79,13 @@ export function TerminalScreen() {
   const [creating, setCreating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [modelSheet, setModelSheet] = useState(false);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsProbe, setModelsProbe] = useState('');
+  const [agents, setAgents] = useState<AgentOption[]>([]);
+  const [picked, setPicked] = useState<{ session: string | null; value: string } | null>(null);
   const pendingPermission = useAppStore((state) => state.pendingPermission);
+  const setSettings = useAppStore((state) => state.setSettings);
 
   const answerPermission = useCallback(
     async (decision: 'once' | 'always' | 'reject') => {
@@ -111,6 +120,93 @@ export function TerminalScreen() {
     ];
     return parts.filter(Boolean).join(' · ') || 'opencode remoto';
   }, [activeSession]);
+
+  const models = useModels(connected);
+  const preferredModel = useAppStore((state) => state.settings.rafaelAgentModel);
+  const pickedValue = picked && picked.session === activeSessionId ? picked.value : '';
+  const modelValue = pickedValue || activeSession?.model || preferredModel || '';
+  const currentModel = models.find((model) => model.value === modelValue);
+  const modelLabel = currentModel?.label ?? (modelValue ? modelValue.split('/').pop() ?? modelValue : 'modelo padrão');
+
+  const openModels = useCallback(() => {
+    haptic('light');
+    setModelSheet(true);
+    setModelsLoading(true);
+    void Promise.all([refreshModels(true), websocket.fetchAgents()])
+      .then(([, list]) => setAgents(list))
+      .finally(() => {
+        setModelsProbe(getModelProbe());
+        setModelsLoading(false);
+      });
+  }, []);
+
+  const applyModel = useCallback(
+    async (option: ModelOption | null) => {
+      setModelSheet(false);
+      if (!activeSessionId) {
+        setNotice('Pareie o app com o PC primeiro');
+        return;
+      }
+
+      let target = option;
+      if (!target) {
+        target = getDefaultModel();
+        if (!target) {
+          await refreshModels(true);
+          target = getDefaultModel();
+        }
+      }
+      if (!target) {
+        setNotice('O PC não informou o modelo padrão');
+        return;
+      }
+
+      haptic('tap');
+      setSettings({ rafaelAgentModel: option?.value ?? '' });
+      const ok = await websocket.setSessionModel(activeSessionId, target);
+      if (!ok) {
+        setNotice('O PC não aceitou trocar o modelo');
+        return;
+      }
+      setPicked({ session: activeSessionId, value: target.value });
+      setNotice(option ? `modelo: ${target.label}` : `padrão: ${target.label}`);
+    },
+    [activeSessionId, setSettings]
+  );
+
+  const selectAgent = useCallback(
+    async (agent: string) => {
+      haptic('tap');
+      if (!activeSessionId) return;
+      const ok = await websocket.setSessionAgent(activeSessionId, agent);
+      setModelSheet(false);
+      setNotice(ok ? `agente: ${agent}` : 'O PC não aceitou trocar o agente');
+    },
+    [activeSessionId]
+  );
+
+  const manualModel = useCallback(
+    (value: string) => {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        void applyModel(null);
+        return;
+      }
+      const slash = trimmed.indexOf('/');
+      if (slash <= 0) {
+        setNotice('digite no formato provedor/modelo');
+        return;
+      }
+      void applyModel({
+        value: trimmed,
+        label: trimmed.slice(slash + 1),
+        provider: trimmed.slice(0, slash),
+        providerID: trimmed.slice(0, slash),
+        modelID: trimmed.slice(slash + 1),
+      });
+    },
+    [applyModel]
+  );
 
   const lastMessage = messages[messages.length - 1];
 
@@ -415,6 +511,25 @@ export function TerminalScreen() {
         ) : null}
 
         <View style={{ paddingBottom: Math.max(insets.bottom, 6) }}>
+          <Pressable
+            onPress={openModels}
+            accessibilityRole="button"
+            accessibilityLabel={`Modelo: ${modelLabel}. Toque para trocar`}
+            style={({ pressed }) => [
+              styles.modelChip,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.border,
+                opacity: pressed ? 0.65 : 1,
+              },
+            ]}
+          >
+            <Cpu size={12} color={colors.mutedForeground} strokeWidth={2.2} />
+            <Text numberOfLines={1} style={[styles.modelChipText, { color: colors.mutedForeground }]}>
+              {modelLabel}
+            </Text>
+            <ChevronDown size={11} color={colors.mutedForeground} strokeWidth={2.4} />
+          </Pressable>
           <Composer
             value={draft}
             onChangeText={setDraft}
@@ -437,6 +552,41 @@ export function TerminalScreen() {
           setPickerOpen(false);
         }}
         onCreate={handleCreate}
+      />
+
+      <ModelSheet
+        visible={modelSheet}
+        onClose={() => setModelSheet(false)}
+        selected={modelValue}
+        models={models}
+        loading={modelsLoading}
+        probe={modelsProbe}
+        agents={agents}
+        selectedAgent={activeSession?.agent ?? ''}
+        onSelectAgent={selectAgent}
+        onSelect={applyModel}
+        onManual={() => {
+          if (Platform.OS !== 'ios') return;
+          Alert.prompt(
+            'Modelo do OpenCode',
+            'Ex.: anthropic/claude-sonnet-4. Deixe vazio para o padrão do PC.',
+            (value) => {
+              setModelSheet(false);
+              manualModel(value);
+            },
+            'plain-text',
+            modelValue
+          );
+        }}
+        onRefresh={() => {
+          setModelsLoading(true);
+          void Promise.all([refreshModels(true), websocket.fetchAgents()])
+            .then(([, list]) => setAgents(list))
+            .finally(() => {
+              setModelsProbe(getModelProbe());
+              setModelsLoading(false);
+            });
+        }}
       />
     </View>
   );
@@ -467,6 +617,20 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 13.5, lineHeight: 20, textAlign: 'center' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 8 },
   chip: { paddingHorizontal: 13, paddingVertical: 8, borderRadius: 999, borderWidth: 1 },
+  modelChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 5,
+    marginLeft: 12,
+    marginBottom: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    maxWidth: '78%',
+  },
+  modelChipText: { fontSize: 11.5, fontWeight: '600', flexShrink: 1 },
   banner: {
     flexDirection: 'row',
     alignItems: 'center',

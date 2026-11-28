@@ -104,6 +104,8 @@ const defaultSettings: AppSettings = {
   rafaelColorTo: '#9D8BFF',
   rafaelColorCycle: true,
   rafaelSummary: 'auto',
+  rafaelVoiceSpeed: 1.12,
+  rafaelVoiceVolume: 6,
   rafaelAgentModel: '',
 };
 

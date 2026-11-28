@@ -684,7 +684,10 @@ class OpenCodeSSE {
         workingDirectory: item.location?.directory ?? '',
         lastActivity: item.time?.updated ?? Date.now(),
         agent: typeof item.agent === 'string' ? item.agent : undefined,
-        model: typeof item.model?.id === 'string' ? item.model.id : undefined,
+        model:
+          typeof item.model?.id === 'string'
+            ? [item.model.providerID, item.model.id].filter(Boolean).join('/')
+            : undefined,
       }))
       .sort((a: OpenCodeSession, b: OpenCodeSession) => b.lastActivity - a.lastActivity);
 

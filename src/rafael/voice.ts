@@ -57,12 +57,21 @@ let speaking = false;
 
 function speakNative(clean: string) {
   if (!Speech) return;
+  const speed = useAppStore.getState().settings.rafaelVoiceSpeed ?? 1.12;
+  // Depois do microfone o iOS pode continuar no modo "gravar", que toca no
+  // alto-falante de ouvido (bem baixo). Volta para o alto-falante normal.
+  void Audio?.setAudioModeAsync({
+    allowsRecording: false,
+    playsInSilentMode: true,
+    shouldRouteThroughEarpiece: false,
+  }).catch(() => undefined);
   try {
     Speech.stop();
     speaking = true;
     Speech.speak(clean, {
       language: 'pt-BR',
-      rate: 1.02,
+      rate: Math.min(2, 1.02 * speed),
+      volume: 1,
       pitch: 1,
       onDone: () => {
         speaking = false;

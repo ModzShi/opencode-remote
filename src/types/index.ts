@@ -122,7 +122,11 @@ export interface AppSettings {
   rafaelColorCycle?: boolean;
   /** Resumo falado quando a resposta é longa. */
   rafaelSummary?: 'auto' | 'full' | 'off';
-  /** Modelo do agente usado no Rafael (enviado junto com o prompt). */
+  /** Velocidade da voz (1 = normal, 0.5–2.0). */
+  rafaelVoiceSpeed?: number;
+  /** Volume extra da voz em dB (0 = original). */
+  rafaelVoiceVolume?: number;
+  /** Modelo do agente escolhido no app (Rafael e chat). */
   rafaelAgentModel?: string;
 }
 

@@ -58,6 +58,20 @@ const SUMMARY_MODES: { value: 'auto' | 'full' | 'off'; label: string }[] = [
   { value: 'off', label: 'Sem voz' },
 ];
 
+const VOICE_SPEEDS = [
+  { value: '1', label: '1x' },
+  { value: '1.12', label: '1,12x' },
+  { value: '1.25', label: '1,25x' },
+  { value: '1.4', label: '1,4x' },
+];
+
+const VOICE_VOLUMES = [
+  { value: '0', label: 'Normal' },
+  { value: '6', label: '+6 dB' },
+  { value: '10', label: '+10 dB' },
+  { value: '14', label: '+14 dB' },
+];
+
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
@@ -297,6 +311,34 @@ export default function SettingsScreen() {
             onChange={(value) =>
               setSettings({ rafaelSummary: value as 'auto' | 'full' | 'off' })
             }
+          />
+        </View>
+
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+        <View style={styles.paddedRow}>
+          <Text style={[styles.rowLabel, { color: colors.foreground }]}>Velocidade da voz</Text>
+          <Text style={[styles.rowHint, { color: colors.mutedForeground }]}>
+            Mais rápido sem embolar (Fish e voz do iOS)
+          </Text>
+          <Chips
+            options={VOICE_SPEEDS}
+            value={String(settings.rafaelVoiceSpeed ?? 1.12)}
+            onChange={(value) => setSettings({ rafaelVoiceSpeed: Number(value) })}
+          />
+        </View>
+
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+        <View style={styles.paddedRow}>
+          <Text style={[styles.rowLabel, { color: colors.foreground }]}>Volume da voz</Text>
+          <Text style={[styles.rowHint, { color: colors.mutedForeground }]}>
+            Ganho em dB aplicado na fala do Fish Audio
+          </Text>
+          <Chips
+            options={VOICE_VOLUMES}
+            value={String(settings.rafaelVoiceVolume ?? 6)}
+            onChange={(value) => setSettings({ rafaelVoiceVolume: Number(value) })}
           />
         </View>
 

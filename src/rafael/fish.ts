@@ -21,6 +21,12 @@ interface FishConfig {
   voice: string;
   model: string;
   summary: 'auto' | 'full' | 'off';
+  speed: number;
+  volume: number;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function config(): FishConfig {
@@ -29,6 +35,10 @@ function config(): FishConfig {
     voice: settings.rafaelVoiceId || ENV_VOICE,
     model: settings.rafaelTtsModel || 's2.1-pro-free',
     summary: settings.rafaelSummary ?? 'auto',
+    // Voz um pouco mais rápida e mais alta: o padrão do Fish sai baixo e lento
+    // no alto-falante do iPhone.
+    speed: clamp(settings.rafaelVoiceSpeed ?? 1.12, 0.5, 2),
+    volume: clamp(settings.rafaelVoiceVolume ?? 6, -10, 15),
   };
 }
 
@@ -93,6 +103,11 @@ async function synthesize(text: string, cfg: FishConfig, signal: AbortSignal): P
       normalize: true,
       chunk_length: 100,
       latency: 'balanced',
+      prosody: {
+        speed: cfg.speed,
+        volume: cfg.volume,
+        normalize_loudness: true,
+      },
     }),
     signal,
   });
@@ -116,6 +131,11 @@ function play(uri: string, signal: AbortSignal): Promise<void> {
     };
 
     const next = createAudioPlayer({ uri });
+    try {
+      next.volume = 1;
+    } catch {
+      // player antigo sem volume
+    }
     player = next;
     const subscription = next.addListener('playbackStatusUpdate', (status) => {
       if (status.didJustFinish) finish();
@@ -168,7 +188,11 @@ export function speakFish(text: string): boolean {
 
   void (async () => {
     try {
-      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+        shouldRouteThroughEarpiece: false,
+      });
     } catch {
       // segue com o modo atual
     }
