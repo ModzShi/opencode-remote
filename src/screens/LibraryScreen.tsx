@@ -139,9 +139,11 @@ export function LibraryScreen() {
     setCreateOpen(false);
     setForm({ name: '', description: '', instructions: '' });
     await load();
+    const file = result.path?.split(/[\\/]/).pop() ?? '';
+    const mention = file.replace(/\.md$/i, '') || name;
     Alert.alert(
       'Subagente criado',
-      `Salvo em ${result.path ?? 'agent/'}. No chat, mencione @${name.split(/\s+/)[0].toLowerCase()} para chamar.`
+      `Salvo em ${result.path ?? 'agent/'}. No chat, mencione @${mention} para chamar.`
     );
   }, [form, load]);
 

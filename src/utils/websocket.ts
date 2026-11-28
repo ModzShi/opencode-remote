@@ -926,7 +926,12 @@ class OpenCodeSSE {
     const slug = agentSlug(input.name);
     if (!slug) return { ok: false, error: 'Escolha um nome com letras ou números' };
     const path = joinPath(directory, `${slug}.md`);
-    const payload = await this.request(`/api/experimental/fs/write?path=${encodeURIComponent(path)}`, {
+    const encoded = encodeURIComponent(path);
+    const existing = await this.request(`/api/fs/read/${encoded}`, undefined, true);
+    if (existing !== null) {
+      return { ok: false, error: `Já existe um subagente em ${path}. Escolha outro nome.` };
+    }
+    const payload = await this.request(`/api/experimental/fs/write?path=${encoded}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/octet-stream' },
       body: agentMarkdown(input),
