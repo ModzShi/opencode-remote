@@ -2,20 +2,38 @@ import React from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Check, RefreshCw } from 'lucide-react-native';
 import { useTheme } from '@/hooks/useTheme';
-import type { ModelOption } from '@/types';
+import type { AgentOption, ModelOption } from '@/types';
 
 interface ModelSheetProps {
   visible: boolean;
   selected: string;
   models: ModelOption[];
   loading: boolean;
-  onSelect: (value: string) => void;
+  /** De onde veio a lista ou o erro, para diagnosticar o PC. */
+  probe?: string;
+  agents: AgentOption[];
+  selectedAgent: string;
+  onSelectAgent: (agent: string) => void;
+  onSelect: (model: ModelOption | null) => void;
   onManual: () => void;
   onRefresh: () => void;
   onClose: () => void;
 }
 
-export function ModelSheet({ visible, selected, models, loading, onSelect, onManual, onRefresh, onClose }: ModelSheetProps) {
+export function ModelSheet({
+  visible,
+  selected,
+  models,
+  loading,
+  probe,
+  agents,
+  selectedAgent,
+  onSelectAgent,
+  onSelect,
+  onManual,
+  onRefresh,
+  onClose,
+}: ModelSheetProps) {
   const { colors } = useTheme();
 
   const providers = Array.from(new Set(models.map((model) => model.provider)));
@@ -32,7 +50,7 @@ export function ModelSheet({ visible, selected, models, loading, onSelect, onMan
             <View style={styles.headerText}>
               <Text style={[styles.title, { color: colors.foreground }]}>Modelo do OpenCode</Text>
               <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-                O modelo que responde no seu PC
+                {models.length > 0 ? `${models.length} modelos no seu PC` : 'O modelo que responde no seu PC'}
               </Text>
             </View>
             <Pressable onPress={onRefresh} hitSlop={10} style={styles.refresh}>
@@ -46,7 +64,7 @@ export function ModelSheet({ visible, selected, models, loading, onSelect, onMan
 
           <ScrollView style={styles.list} showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
             <Pressable
-              onPress={() => onSelect('')}
+              onPress={() => onSelect(null)}
               style={[styles.option, { borderColor: selected ? colors.primary : 'transparent' }]}
             >
               <View style={styles.optionText}>
@@ -59,10 +77,15 @@ export function ModelSheet({ visible, selected, models, loading, onSelect, onMan
             </Pressable>
 
             {models.length === 0 && !loading ? (
-              <Text style={[styles.empty, { color: colors.mutedForeground }]}>
-                Não consegui listar os modelos. Toque em atualizar; se continuar vazio, escolha “Padrão do
-                agente”.
-              </Text>
+              <View style={styles.emptyBox}>
+                <Text style={[styles.empty, { color: colors.mutedForeground }]}>
+                  O PC não devolveu a lista de modelos. Toque em atualizar; se continuar vazio, use “Digitar
+                  modelo…” ou “Padrão do agente”.
+                </Text>
+                {probe ? (
+                  <Text style={[styles.probe, { color: colors.mutedForeground }]}>{probe}</Text>
+                ) : null}
+              </View>
             ) : null}
 
             {providers.map((provider) => (
@@ -77,7 +100,7 @@ export function ModelSheet({ visible, selected, models, loading, onSelect, onMan
                     return (
                       <Pressable
                         key={model.value}
-                        onPress={() => onSelect(model.value)}
+                        onPress={() => onSelect(model)}
                         style={[styles.option, { borderColor: active ? colors.primary : 'transparent' }]}
                       >
                         <View style={styles.optionText}>
@@ -92,6 +115,29 @@ export function ModelSheet({ visible, selected, models, loading, onSelect, onMan
                   })}
               </View>
             ))}
+            {agents.length > 0 ? (
+              <View style={styles.group}>
+                <Text style={[styles.groupTitle, { color: colors.mutedForeground }]}>AGENTE (QUEM EXECUTA)</Text>
+                {agents.map((agent) => {
+                  const active = agent.id === selectedAgent;
+                  return (
+                    <Pressable
+                      key={agent.id}
+                      onPress={() => onSelectAgent(agent.id)}
+                      style={[styles.option, { borderColor: active ? colors.primary : 'transparent' }]}
+                    >
+                      <View style={styles.optionText}>
+                        <Text style={[styles.optionName, { color: colors.foreground }]}>{agent.label}</Text>
+                        <Text numberOfLines={1} style={[styles.optionHint, { color: colors.mutedForeground }]}>
+                          {agent.description ?? agent.id}
+                        </Text>
+                      </View>
+                      {active ? <Check size={18} color={colors.primary} strokeWidth={2.6} /> : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
           </ScrollView>
 
           <Pressable onPress={onManual} style={[styles.manual, { borderColor: colors.border }]}>
@@ -141,7 +187,9 @@ const styles = StyleSheet.create({
   optionText: { flex: 1, gap: 2 },
   optionName: { fontSize: 14.5, fontWeight: '700' },
   optionHint: { fontSize: 11.5 },
-  empty: { fontSize: 12.5, lineHeight: 18, marginTop: 10 },
+  emptyBox: { gap: 6, marginTop: 10 },
+  empty: { fontSize: 12.5, lineHeight: 18 },
+  probe: { fontSize: 11, lineHeight: 16, opacity: 0.7 },
   manual: {
     marginTop: 8,
     alignItems: 'center',

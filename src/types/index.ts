@@ -1,11 +1,33 @@
 export interface ModelOption {
-  /** provider/model — o que vai no prompt. */
+  /** provider/model — identificador único desta lista. */
   value: string;
   /** nome amigável para mostrar. */
   label: string;
+  /** nome do provedor para agrupar na lista. */
   provider: string;
+  /** id do provedor no servidor (ex.: 'anthropic'). */
+  providerID?: string;
+  /** id do modelo no servidor (ex.: 'claude-sonnet-4'). */
+  modelID?: string;
   /** true quando é o modelo padrão do servidor. */
   isDefault?: boolean;
+}
+
+/** Agente do OpenCode (quem executa: build tem ferramentas, plan só lê...). */
+export interface AgentOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+/** Pedido de permissão que o agente do PC está esperando para continuar. */
+export interface PendingPermission {
+  id: string;
+  sessionID: string;
+  action: string;
+  resources: string[];
+  message?: string;
+  save?: string[];
 }
 
 export interface OpenCodeSession {

@@ -11,6 +11,7 @@ import {
   FileNode,
   MessagePart,
   TextPart,
+  PendingPermission,
 } from '@/types';
 import type { UpdateInfo } from '@/utils/updates';
 
@@ -80,6 +81,10 @@ interface AppState {
   // Atualizações
   updateInfo: UpdateInfo | null;
   setUpdateInfo: (info: UpdateInfo | null) => void;
+
+  // Permissão pendente do agente (executar comando, editar arquivo...)
+  pendingPermission: PendingPermission | null;
+  setPendingPermission: (permission: PendingPermission | null) => void;
 }
 
 const defaultSettings: AppSettings = {
@@ -264,6 +269,10 @@ export const useAppStore = create<AppState>()(
       // Atualizações
       updateInfo: null,
       setUpdateInfo: (info) => set({ updateInfo: info }),
+
+      // Permissão pendente
+      pendingPermission: null,
+      setPendingPermission: (permission) => set({ pendingPermission: permission }),
     }),
     {
       name: 'opencode-remote-storage',

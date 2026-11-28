@@ -14,14 +14,15 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowUp, ChevronDown, Keyboard as KeyboardIcon, Sparkles, X } from 'lucide-react-native';
+import { ArrowUp, ChevronDown, Keyboard as KeyboardIcon, ShieldAlert, Sparkles, X } from 'lucide-react-native';
 import { useAppStore } from '@/store';
 import { websocket } from '@/utils/websocket';
 import { haptic } from '@/utils/haptics';
 import { Orb, findOrbStyle, type OrbState } from '@/rafael/Orb';
-import { refreshModels, useModels } from '@/rafael/models';
+import { getDefaultModel, getModelProbe, refreshModels, useModels } from '@/rafael/models';
 import { ModelSheet } from '@/components/ModelSheet';
 import { speak, stopSpeaking, voiceReady } from '@/rafael/voice';
+import type { AgentOption, ModelOption } from '@/types';
 
 // A escuta nativa só existe se o binário tiver o módulo instalado.
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -51,6 +52,56 @@ function normalize(value: string): string {
     .trim();
 }
 
+// "troca para o modelo opus", "usa o modelo gpt", "qual é o seu modelo?"
+const MODEL_SWITCH = /(?:troca|trocar|muda|mudar|usa|usar|seleciona|selecionar|escolhe|escolher|ativa|ativar|configura|configurar|coloca|colocar|poe|por)\s+(?:para|pro|pra|de|em)?\s*(?:o\s+)?modelo\s*(?:para|pro|pra|de|em|:)?\s*(.+)$/;
+
+type ModelIntent = { kind: 'query' } | { kind: 'switch'; target: string };
+
+function parseModelIntent(text: string): ModelIntent | null {
+  const value = normalize(text);
+  if (!value.includes('modelo')) return null;
+
+  if (
+    /(qual|quais|que)\s+(e\s+)?(o\s+)?(seu\s+)?modelo/.test(value) ||
+    /modelo\s+(voce\s+)?(esta|ta)\s+(usando|usa)/.test(value)
+  ) {
+    return { kind: 'query' };
+  }
+
+  const match = value.match(MODEL_SWITCH);
+  const target = (match?.[1] ?? value.replace(/^.*?modelo\s*/, ''))
+    .replace(/^(chamado|chamada|que\s+e|que\s+se\s+chama)\s+/, '')
+    .trim();
+
+  return { kind: 'switch', target };
+}
+
+function modelScore(target: string, model: ModelOption): number {
+  const label = normalize(model.label);
+  const value = normalize(model.value);
+  if (label === target || value === target) return 100;
+  if (label.startsWith(target) || value.endsWith('/' + target)) return 80;
+  if (label.includes(target) || value.includes(target)) return 60;
+
+  const words = target.split(/\s+/).filter((word) => word.length > 2);
+  if (words.length === 0) return 0;
+  const hits = words.filter((word) => label.includes(word) || value.includes(word)).length;
+  return (hits / words.length) * 40;
+}
+
+function bestModelMatch(target: string, models: ModelOption[]): ModelOption | null {
+  let best: ModelOption | null = null;
+  let score = 0;
+  for (const model of models) {
+    const next = modelScore(target, model);
+    if (next > score) {
+      score = next;
+      best = model;
+    }
+  }
+  return score >= 40 ? best : null;
+}
+
 export function RafaelScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -76,6 +127,8 @@ export function RafaelScreen() {
   const [modelSheet, setModelSheet] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
   const models = useModels(connectionStatus === 'connected');
+  const [modelsProbe, setModelsProbe] = useState('');
+  const [agents, setAgents] = useState<AgentOption[]>([]);
 
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const micLevel = useRef(0);
@@ -86,6 +139,9 @@ export function RafaelScreen() {
 
   const session = sessions.find((item) => item.id === activeSessionId);
   const running = session?.status === 'running';
+  const pendingPermission = useAppStore((state) => state.pendingPermission);
+  const chosenModel = models.find((model) => model.value === agentModel);
+  const modelLabel = agentModel ? chosenModel?.label ?? agentModel : 'modelo padrão';
 
   const lastAssistant = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -132,10 +188,39 @@ export function RafaelScreen() {
     return () => clearTimeout(id);
   }, [shownSubtitle, subtitle]);
 
+  // O modelo vive no PC: reaplica o escolhido quando entra na sessão.
+  // (Não trocamos o agente: o agente padrão é o que tem as ferramentas.)
+  const appliedModel = useRef('');
+  useEffect(() => {
+    if (!activeSessionId || !agentModel) return;
+    const key = `${activeSessionId}:${agentModel}`;
+    if (appliedModel.current === key) return;
+    appliedModel.current = key;
+    void websocket.setSessionModel(activeSessionId, { value: agentModel });
+  }, [activeSessionId, agentModel]);
+
+  // Um pedido de permissão pode já estar aberto (agente parado esperando).
   useEffect(() => {
     if (!activeSessionId) return;
-    void websocket.setSessionAgent(activeSessionId, 'rafael');
+    void websocket.fetchPendingPermission(activeSessionId);
   }, [activeSessionId]);
+
+  // Versões antigas do app forçavam o agente "rafael" na sessão; se ele ficou
+  // para trás, volta para um agente com ferramentas (build).
+  const repairedAgent = useRef(false);
+  useEffect(() => {
+    if (repairedAgent.current || !activeSessionId) return;
+    const current = sessions.find((item) => item.id === activeSessionId)?.agent;
+    if (current !== 'rafael') return;
+    repairedAgent.current = true;
+    void websocket.fetchAgents().then((list) => {
+      const target = list.find((agent) => agent.id === 'build') ?? list.find((agent) => agent.id !== 'rafael');
+      if (!target) return;
+      void websocket.setSessionAgent(activeSessionId, target.id).then((ok) => {
+        if (ok) setNotice(`agente: ${target.label}`);
+      });
+    });
+  }, [activeSessionId, sessions]);
 
   // Rafael fala a resposta quando o streaming termina.
   useEffect(() => {
@@ -159,6 +244,92 @@ export function RafaelScreen() {
     else router.replace('/(tabs)/terminal');
   }, [router]);
 
+  const answerPermission = useCallback(
+    async (decision: 'once' | 'always' | 'reject') => {
+      const request = useAppStore.getState().pendingPermission;
+      if (!request) return;
+      haptic('tap');
+      const ok = await websocket.replyPermission(request.sessionID || activeSessionId || '', request.id, decision);
+      if (ok) {
+        useAppStore.getState().setPendingPermission(null);
+        setNotice(decision === 'reject' ? 'Permissão negada.' : 'Permissão liberada.');
+      } else {
+        haptic('error');
+        setNotice('O PC não aceitou a resposta da permissão.');
+      }
+    },
+    [activeSessionId]
+  );
+
+  const applyModel = useCallback(
+    async (option: ModelOption | null) => {
+      haptic('tap');
+      setSettings({ rafaelAgentModel: option?.value ?? '' });
+      if (!activeSessionId) {
+        setNotice(null);
+        return;
+      }
+
+      // "Padrão" = modelo padrão que o próprio PC informou.
+      let target = option;
+      if (!target) {
+        target = getDefaultModel();
+        if (!target) {
+          await refreshModels(true);
+          target = getDefaultModel();
+        }
+      }
+
+      if (!target) {
+        setNotice('o PC não informou o modelo padrão.');
+        if (voiceReady.speech) speak('Não descobri o modelo padrão do PC.');
+        return;
+      }
+
+      const ok = await websocket.setSessionModel(activeSessionId, target);
+      if (!ok) {
+        setNotice('O PC não aceitou trocar o modelo.');
+        if (voiceReady.speech) speak('Não consegui trocar o modelo no PC.');
+        return;
+      }
+
+      setNotice(option ? `modelo: ${target.label}` : `padrão: ${target.label}`);
+      if (voiceReady.speech) {
+        speak(option ? `Modelo trocado para ${target.label}.` : `Voltei para ${target.label}.`);
+      }
+    },
+    [activeSessionId, setSettings]
+  );
+
+  const handleModelIntent = useCallback(
+    async (intent: ModelIntent) => {
+      if (intent.kind === 'query') {
+        const label = agentModel ? modelLabel : 'o modelo padrão do agente';
+        setNotice(`modelo: ${label}`);
+        if (voiceReady.speech) speak(`Estou usando ${label}.`);
+        return;
+      }
+
+      const list = models.length > 0 ? models : await refreshModels(true);
+      const option = bestModelMatch(intent.target, list);
+      if (!option) {
+        haptic('error');
+        setNotice(list.length > 0 ? `não achei “${intent.target}”` : 'a lista de modelos está vazia');
+        if (voiceReady.speech) {
+          speak(
+            list.length > 0
+              ? `Não achei esse modelo. Você tem ${list.length} modelos.`
+              : 'Não consegui listar os modelos do PC.'
+          );
+        }
+        return;
+      }
+
+      await applyModel(option);
+    },
+    [agentModel, applyModel, modelLabel, models]
+  );
+
   const send = useCallback(
     async (raw: string) => {
       const text = raw.trim();
@@ -169,6 +340,25 @@ export function RafaelScreen() {
         setHeard('');
         heardRef.current = '';
         close();
+        return;
+      }
+
+      // Com uma permissão aberta, "sim" e "não" respondem o pedido do PC.
+      if (useAppStore.getState().pendingPermission) {
+        if (/^(sim|pode|pode ser|permitir|permite|autoriza|autorizar|ok|claro|manda|vai|aceito|aceitar|liberar|libera)\b/.test(normalized)) {
+          await answerPermission('once');
+          return;
+        }
+        if (/^(nao|nega|negar|recusa|recusar|bloqueia|bloquear|pare|espera|deixa)\b/.test(normalized)) {
+          await answerPermission('reject');
+          return;
+        }
+      }
+
+      // "troca para o modelo X" é resolvido aqui, sem ir para o agente.
+      const modelIntent = parseModelIntent(text);
+      if (modelIntent) {
+        await handleModelIntent(modelIntent);
         return;
       }
 
@@ -183,7 +373,7 @@ export function RafaelScreen() {
       setHeard('');
       heardRef.current = '';
       stopSpeaking();
-      const ok = await websocket.sendCommand(text, activeSessionId, agentModel || undefined);
+      const ok = await websocket.sendCommand(text, activeSessionId);
       setSending(false);
       if (!ok) {
         haptic('error');
@@ -195,7 +385,7 @@ export function RafaelScreen() {
         setDraft('');
       }
     },
-    [activeSessionId, agentModel, close]
+    [activeSessionId, answerPermission, close, handleModelIntent]
   );
 
   const stopListening = useCallback(() => {
@@ -325,23 +515,73 @@ export function RafaelScreen() {
     await send(text);
   }, [closeInput, draft, send]);
 
-  const chosenModel = models.find((model) => model.value === agentModel);
-  const modelLabel = agentModel ? chosenModel?.label ?? agentModel : 'modelo padrão';
-
   const openModels = useCallback(() => {
     haptic('light');
     setModelSheet(true);
     setModelsLoading(true);
-    void refreshModels(true).finally(() => setModelsLoading(false));
+    void Promise.all([refreshModels(true), websocket.fetchAgents()])
+      .then(([, list]) => setAgents(list))
+      .finally(() => {
+        setModelsProbe(getModelProbe());
+        setModelsLoading(false);
+      });
   }, []);
 
-  const selectModel = useCallback(
-    (value: string) => {
+  const selectAgent = useCallback(
+    async (agent: string) => {
       haptic('tap');
-      setSettings({ rafaelAgentModel: value });
+      if (!activeSessionId) return;
+      const ok = await websocket.setSessionAgent(activeSessionId, agent);
       setModelSheet(false);
+      setNotice(ok ? `agente: ${agent}` : 'O PC não aceitou trocar o agente.');
+      if (voiceReady.speech) {
+        speak(ok ? `Agora usando o agente ${agent}.` : 'Não consegui trocar o agente.');
+      }
     },
-    [setSettings]
+    [activeSessionId]
+  );
+
+  const selectModel = useCallback(
+    (option: ModelOption | null) => {
+      setModelSheet(false);
+      void applyModel(option);
+    },
+    [applyModel]
+  );
+
+  const manualModel = useCallback(
+    (value: string) => {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        void applyModel(null);
+        return;
+      }
+      const slash = trimmed.indexOf('/');
+      if (slash <= 0) {
+        // Sem "provedor/modelo", tenta casar pelo nome com a lista do PC.
+        const match = models.find(
+          (model) => normalize(model.modelID ?? '') === normalize(trimmed) || normalize(model.label) === normalize(trimmed)
+        );
+        if (!match) {
+          setNotice('digite no formato provedor/modelo (ex.: anthropic/claude-sonnet-4)');
+          if (voiceReady.speech) speak('Digite o provedor e o modelo, separados por barra.');
+          return;
+        }
+        void applyModel(match);
+        return;
+      }
+
+      const providerID = trimmed.slice(0, slash);
+      const modelID = trimmed.slice(slash + 1);
+      void applyModel({
+        value: trimmed,
+        label: modelID,
+        provider: providerID,
+        providerID,
+        modelID,
+      });
+    },
+    [applyModel, models]
   );
 
   const orbSize = Math.min(Dimensions.get('window').width * 0.82, 340);
@@ -401,6 +641,33 @@ export function RafaelScreen() {
           {!writing && !listening ? <Text style={styles.hint}>toque para falar</Text> : null}
         </View>
 
+        {pendingPermission ? (
+          <View style={styles.perm}>
+            <View style={styles.permHead}>
+              <ShieldAlert size={13} color="#ffd166" strokeWidth={2.2} />
+              <Text style={styles.permTitle}>o rafael precisa de permissão</Text>
+            </View>
+            <Text numberOfLines={3} style={styles.permText}>
+              {pendingPermission.action}
+              {pendingPermission.resources.length > 0
+                ? `\n${pendingPermission.resources.slice(0, 2).join('  ·  ')}`
+                : ''}
+            </Text>
+            <View style={styles.permRow}>
+              <Pressable onPress={() => answerPermission('once')} style={[styles.permButton, styles.permAllow]}>
+                <Text style={styles.permAllowText}>permitir</Text>
+              </Pressable>
+              <Pressable onPress={() => answerPermission('always')} style={styles.permButton}>
+                <Text style={styles.permButtonText}>sempre</Text>
+              </Pressable>
+              <Pressable onPress={() => answerPermission('reject')} style={styles.permButton}>
+                <Text style={[styles.permButtonText, styles.permDeny]}>negar</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.permHint}>ou diga “sim” / “não”</Text>
+          </View>
+        ) : null}
+
         <Pressable onPress={openModels} style={styles.modelChip} hitSlop={8}>
           <Sparkles size={12} color="#8a8f9c" strokeWidth={2.2} />
           <Text numberOfLines={1} style={styles.modelLabel}>
@@ -447,6 +714,10 @@ export function RafaelScreen() {
         selected={agentModel ?? ''}
         models={models}
         loading={modelsLoading}
+        probe={modelsProbe}
+        agents={agents}
+        selectedAgent={session?.agent ?? ''}
+        onSelectAgent={selectAgent}
         onSelect={selectModel}
         onManual={() => {
           if (Platform.OS !== 'ios') return;
@@ -454,8 +725,8 @@ export function RafaelScreen() {
             'Modelo do OpenCode',
             'Ex.: anthropic/claude-sonnet-4. Deixe vazio para o padrão do agente.',
             (value) => {
-              setSettings({ rafaelAgentModel: value.trim() });
               setModelSheet(false);
+              manualModel(value);
             },
             'plain-text',
             agentModel ?? ''
@@ -463,7 +734,10 @@ export function RafaelScreen() {
         }}
         onRefresh={() => {
           setModelsLoading(true);
-          void refreshModels(true).finally(() => setModelsLoading(false));
+          void refreshModels(true).finally(() => {
+            setModelsProbe(getModelProbe());
+            setModelsLoading(false);
+          });
         }}
         onClose={() => setModelSheet(false)}
       />
@@ -504,6 +778,38 @@ const styles = StyleSheet.create({
     marginTop: 14,
     textTransform: 'uppercase',
   },
+  perm: {
+    marginHorizontal: 22,
+    marginBottom: 10,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,209,102,0.07)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,209,102,0.30)',
+    gap: 8,
+  },
+  permHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  permTitle: {
+    color: '#ffd166',
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
+  permText: { color: '#e8e8e8', fontSize: 12.5, lineHeight: 18 },
+  permRow: { flexDirection: 'row', gap: 8 },
+  permButton: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  permButtonText: { color: '#cfcfcf', fontSize: 11.5, fontWeight: '700', letterSpacing: 0.4 },
+  permAllow: { backgroundColor: '#ffd166' },
+  permAllowText: { color: '#000000', fontSize: 11.5, fontWeight: '800', letterSpacing: 0.4 },
+  permDeny: { color: '#ff6b6b' },
+  permHint: { color: '#6d6d6d', fontSize: 10, letterSpacing: 0.8, textAlign: 'right' },
   modelChip: {
     flexDirection: 'row',
     alignItems: 'center',

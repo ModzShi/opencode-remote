@@ -1,6 +1,6 @@
 # Voz do Rafael
 
-Estado atual (v1.2.0): microfone, ditado, voz na nuvem e escolha do modelo já vão
+Estado atual (v1.2.1): microfone, ditado, voz na nuvem e escolha do modelo já vão
 compilados no `.ipa` pelo workflow de CI (`macos-26` + prebuild + archive).
 
 ## Como funciona
@@ -64,10 +64,45 @@ Violeta, Gelo, Fogo, Menta, Rosa, Ouro, Prata).
 
 ## Modelo do OpenCode
 
-Acima do campo de escrita existe a pílula do modelo. Ao tocar, o app consulta o PC
-(`/api/config/providers`, `/api/provider`, `/api/config`, `/api/model`) e lista os
-modelos que o seu OpenCode tem. A escolha vale para os próximos prompts (campo
-`model` no corpo do `/api/session/:id/prompt`). "Padrão do agente" volta ao modelo do PC.
+Acima do campo de escrita existe a pílula do modelo. Ao tocar, o app lê o catálogo
+real do PC:
+
+- `GET /api/model` — modelos disponíveis (`{ data: Model.Info[] }`, com
+  `providerID` + `id`); nomes de provedor vêm de `GET /api/provider`;
+- `GET /api/model/default` — modelo padrão do servidor (usado em "Padrão do agente");
+- servidores antigos: `/api/config/providers`, `/api/config` e `/api/provider`.
+
+A troca é feita em `POST /api/session/:id/model` com
+`{ model: { providerID, id } }` — o `/prompt` não aceita o campo `model`.
+Se o app não conseguir listar, a folha mostra os status HTTP de `/api/model` e
+`/api/provider` para diagnosticar.
+
+A mesma folha lista os **agentes** do PC (`GET /api/agent`) e deixa trocar
+(`POST /api/session/:id/agent`). O agente `build` tem ferramentas (roda comandos,
+edita arquivos); `plan` só lê. O app **não força mais** o agente `rafael` — isso era o
+que deixava o modelo "sem acesso ao PC".
+
+## Comandos por voz
+
+| Você diz | O que acontece |
+|---|---|
+| "troca para o modelo opus" | casa com a lista do PC e troca via `/session/:id/model` |
+| "usa o modelo gpt-5" | idem |
+| "qual é o seu modelo?" | o Rafael fala o modelo atual |
+| "qual é o modelo do PC?" | idem |
+| "sim" / "pode" / "permitir" | libera o pedido de permissão pendente (uma vez) |
+| "não" / "nega" / "recusa" | recusa o pedido pendente |
+
+## Permissões (controlar o PC)
+
+Quando o agente precisa rodar um comando ou editar um arquivo, o OpenCode abre um
+pedido de permissão e **fica parado esperando**. O app escuta os eventos
+`permission.asked` / `permission.updated`, mostra um cartão acima da pílula
+("o rafael precisa de permissão") com **permitir / sempre / negar** e aceita
+"sim"/"não" por voz. A resposta vai em
+`POST /api/session/:id/permission/:requestID/reply` (`{ decision }`;
+servidores antigos: `/permissions/:id` com `{ response }`).
+Sem isso, o agente não conclui a tarefa e o modelo responde que não tem acesso.
 
 ## Resumo dos recursos
 
@@ -79,5 +114,7 @@ modelos que o seu OpenCode tem. A escolha vale para os próximos prompts (campo
 | Rafael falando em voz alta | sim (Fish; fallback iOS) |
 | Escolha da voz e do modelo de voz | sim (Ajustes) |
 | Escolha do orbe e das cores | sim (Ajustes) |
-| Escolha do modelo do OpenCode | sim (pílula acima do campo) |
+| Escolha do modelo do OpenCode | sim (pílula acima do campo; lista real do PC) |
+| Troca de modelo por voz | sim |
+| Aprovar permissões por voz | sim ("sim"/"não") |
 | Resumo automático de respostas longas | sim |

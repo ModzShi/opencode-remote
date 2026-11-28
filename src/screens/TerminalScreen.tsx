@@ -76,6 +76,23 @@ export function TerminalScreen() {
   const [creating, setCreating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const pendingPermission = useAppStore((state) => state.pendingPermission);
+
+  const answerPermission = useCallback(
+    async (decision: 'once' | 'always' | 'reject') => {
+      const request = useAppStore.getState().pendingPermission;
+      if (!request) return;
+      haptic('tap');
+      const ok = await websocket.replyPermission(request.sessionID || activeSessionId || '', request.id, decision);
+      if (ok) {
+        useAppStore.getState().setPendingPermission(null);
+        setNotice(decision === 'reject' ? 'Permissão negada' : 'Permissão liberada');
+      } else {
+        setNotice('Não consegui responder a permissão');
+      }
+    },
+    [activeSessionId]
+  );
 
   const listRef = useRef<FlatList<OpenCodeMessage>>(null);
   const follow = useRef(true);
@@ -309,6 +326,21 @@ export function TerminalScreen() {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+        {pendingPermission ? (
+          <View style={[styles.banner, { backgroundColor: colors.warnSurface, borderColor: colors.warning }]}>
+            <Text numberOfLines={2} style={{ flex: 1, color: colors.foreground, fontSize: 12.5 }}>
+              Permissão: {pendingPermission.action}
+              {pendingPermission.resources.length > 0 ? ` · ${pendingPermission.resources[0]}` : ''}
+            </Text>
+            <Pressable onPress={() => answerPermission('once')} hitSlop={8}>
+              <Text style={{ color: colors.warning, fontSize: 12, fontWeight: '800' }}>permitir</Text>
+            </Pressable>
+            <Pressable onPress={() => answerPermission('reject')} hitSlop={8}>
+              <Text style={{ color: colors.destructive, fontSize: 12, fontWeight: '700' }}>negar</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         <FlatList
           ref={listRef}
           data={messages}

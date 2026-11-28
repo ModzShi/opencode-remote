@@ -1,10 +1,21 @@
 import { useEffect, useState } from 'react';
-import { websocket } from '@/utils/websocket';
+import { websocket, getModelProbe as serverModelProbe, getDefaultModel as serverDefaultModel } from '@/utils/websocket';
 import type { ModelOption } from '@/types';
 
 let cache: ModelOption[] = [];
 let loading: Promise<ModelOption[]> | null = null;
+let probe = '';
 const listeners = new Set<(models: ModelOption[]) => void>();
+
+/** De onde veio a lista (ou os status HTTP quando não veio nada). */
+export function getModelProbe(): string {
+  return probe;
+}
+
+/** Modelo padrão do servidor, quando o PC informou. */
+export function getDefaultModel(): ModelOption | null {
+  return serverDefaultModel();
+}
 
 export function getModels(): ModelOption[] {
   return cache;
@@ -21,6 +32,7 @@ export function refreshModels(force = false): Promise<ModelOption[]> {
   loading = websocket
     .fetchModels()
     .then((models) => {
+      probe = serverModelProbe();
       if (models.length > 0) cache = models;
       listeners.forEach((listener) => listener(cache));
       return cache;

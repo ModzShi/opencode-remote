@@ -1,6 +1,6 @@
 import { useAppStore } from '@/store';
 import { pushEnergy } from '@/rafael/signal';
-import { MessagePart, ModelOption, OpenCodeMessage, OpenCodeSession, PairingData } from '@/types';
+import { AgentOption, MessagePart, ModelOption, OpenCodeMessage, OpenCodeSession, PairingData, PendingPermission } from '@/types';
 import { basicAuthHeader } from './base64';
 import { buildSseEndpoint, exchangePairingCode } from './pairing';
 
@@ -83,6 +83,7 @@ class OpenCodeSSE {
   private generation = 0;
   private pending = new Map<string, { sessionId: string; messageId: string; kind: 'text' | 'reasoning'; text: string }>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private statusByPath = new Map<string, number>();
 
   /**
    * Conecta ao servidor opencode.
@@ -335,6 +336,7 @@ class OpenCodeSSE {
 
       case 'session.execution.failed':
         if (sessionId) {
+          store.setPendingPermission(null);
           store.updateSession(sessionId, { status: 'error' });
           const messageId = data.assistantMessageID;
           if (messageId) {
@@ -345,6 +347,33 @@ class OpenCodeSSE {
           }
         }
         break;
+
+      case 'permission.asked':
+      case 'permission.updated': {
+        const request = data?.id ? data : data?.permission ?? data?.request;
+        const id = request?.id ?? data?.permissionID ?? data?.requestID;
+        if (!id) break;
+        store.setPendingPermission({
+          id: String(id),
+          sessionID: String(request?.sessionID ?? data?.sessionID ?? sessionId ?? ''),
+          action: String(request?.action ?? data?.action ?? data?.title ?? 'usar uma ferramenta'),
+          resources: Array.isArray(request?.resources)
+            ? request.resources.map((item: any) => String(item))
+            : Array.isArray(data?.resources)
+              ? data.resources.map((item: any) => String(item))
+              : [],
+          message: request?.message ?? data?.message,
+          save: Array.isArray(request?.save) ? request.save.map((item: any) => String(item)) : undefined,
+        });
+        break;
+      }
+
+      case 'permission.replied': {
+        const current = store.pendingPermission;
+        const id = data?.id ?? data?.requestID ?? data?.permissionID;
+        if (current && (!id || current.id === String(id))) store.setPendingPermission(null);
+        break;
+      }
 
       case 'session.step.started':
         if (sessionId && data.assistantMessageID) {
@@ -563,6 +592,7 @@ class OpenCodeSSE {
         },
       });
 
+      this.statusByPath.set(path, response.status);
       if (!response.ok) {
         const detail = await response.text().catch(() => '');
         if (!quiet) {
@@ -571,7 +601,14 @@ class OpenCodeSSE {
         return null;
       }
 
-      return await response.json();
+      if (response.status === 204) return {};
+      const body = await response.text();
+      if (!body) return {};
+      try {
+        return JSON.parse(body);
+      } catch {
+        return {};
+      }
     } catch (error) {
       console.error(`[opencode] ${init?.method ?? 'GET'} ${path} falhou:`, error);
       return null;
@@ -580,18 +617,55 @@ class OpenCodeSSE {
 
 
   /**
-   * Lista os modelos que o OpenCode do PC tem instalados.
-   * O bridge expõe /api/*; tentamos os caminhos conhecidos do servidor e
-   * aceitamos formatos diferentes (providers[], all[], mapa de modelos).
+   * Lista os modelos que o OpenCode do PC tem.
+   * O servidor novo publica o catálogo em /api/model ({ data: Model.Info[] })
+   * e os nomes dos provedores em /api/provider. Versões antigas trazem os
+   * modelos dentro de /api/config/providers ou /api/provider.
    */
   async fetchModels(): Promise<ModelOption[]> {
-    const paths = ['/api/config/providers', '/api/provider', '/api/config', '/api/model'];
-    for (const path of paths) {
-      const payload = await this.request(path, undefined, true);
-      if (!payload) continue;
-      const models = normalizeModels(payload);
-      if (models.length > 0) return models;
+    const state = useAppStore.getState();
+    const directory = state.sessions.find((item) => item.id === state.activeSessionId)?.workingDirectory ?? '';
+    const suffix = directory ? `?location[directory]=${encodeURIComponent(directory)}` : '';
+
+    const [providerPayload, modelPayload, defaultPayload] = await Promise.all([
+      this.request(`/api/provider${suffix}`, undefined, true),
+      this.request(`/api/model${suffix}`, undefined, true),
+      this.request(`/api/model/default${suffix}`, undefined, true),
+    ]);
+
+    const providerNames = new Map<string, string>();
+    for (const provider of Array.isArray(providerPayload?.data) ? providerPayload.data : []) {
+      if (provider?.id) providerNames.set(String(provider.id), String(provider.name ?? provider.id));
     }
+
+    const defaultInfo = defaultPayload?.data;
+    if (defaultInfo?.providerID && defaultInfo?.id) {
+      defaultModel = {
+        value: `${defaultInfo.providerID}/${defaultInfo.id}`,
+        label: String(defaultInfo.name ?? defaultInfo.id),
+        provider: providerNames.get(String(defaultInfo.providerID)) ?? String(defaultInfo.providerID),
+        providerID: String(defaultInfo.providerID),
+        modelID: String(defaultInfo.id),
+        isDefault: true,
+      };
+    }
+
+    let models = normalizeModels(modelPayload, providerNames);
+    if (models.length > 0) {
+      modelProbe = `${models.length} modelos em /api/model`;
+      return models;
+    }
+
+    for (const path of ['/api/config/providers', '/api/config', '/api/provider']) {
+      const payload = await this.request(`${path}${suffix}`, undefined, true);
+      models = normalizeModels(payload, providerNames);
+      if (models.length > 0) {
+        modelProbe = `${models.length} modelos em ${path}`;
+        return models;
+      }
+    }
+
+    modelProbe = [`/api/model → ${this.statusByPath.get(`/api/model${suffix}`) ?? 0}`, `/api/provider → ${this.statusByPath.get(`/api/provider${suffix}`) ?? 0}`].join(' · ');
     return [];
   }
   /** Lista as sessões do servidor e ativa a mais recente. */
@@ -609,6 +683,8 @@ class OpenCodeSSE {
         status: 'idle' as const,
         workingDirectory: item.location?.directory ?? '',
         lastActivity: item.time?.updated ?? Date.now(),
+        agent: typeof item.agent === 'string' ? item.agent : undefined,
+        model: typeof item.model?.id === 'string' ? item.model.id : undefined,
       }))
       .sort((a: OpenCodeSession, b: OpenCodeSession) => b.lastActivity - a.lastActivity);
 
@@ -701,16 +777,92 @@ class OpenCodeSSE {
    * Send a prompt/message to a session via HTTP POST.
    * Uses /api/session/:sessionID/prompt endpoint (body: { text }).
    */
-  async sendCommand(command: string, sessionId: string, model?: string): Promise<boolean> {
+  async sendCommand(command: string, sessionId: string): Promise<boolean> {
     if (!sessionId) return false;
 
     const payload = await this.request(`/api/session/${sessionId}/prompt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(model ? { text: command, model } : { text: command }),
+      body: JSON.stringify({ text: command }),
     });
 
     return payload !== null;
+  }
+
+  /**
+   * Troca o modelo da sessão no PC. Vale para os próximos prompts e é o único
+   * jeito de escolher o modelo: /prompt não aceita o campo "model".
+   */
+  async setSessionModel(sessionId: string, model: Pick<ModelOption, 'value' | 'providerID' | 'modelID'>): Promise<boolean> {
+    if (!sessionId || !model.value) return false;
+    const slash = model.value.indexOf('/');
+    const providerID = model.providerID ?? (slash > 0 ? model.value.slice(0, slash) : '');
+    const id = model.modelID ?? (slash > 0 ? model.value.slice(slash + 1) : model.value);
+    if (!providerID || !id) return false;
+
+    const payload = await this.request(`/api/session/${sessionId}/model`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: { providerID, id } }),
+    });
+
+    return payload !== null;
+  }
+
+  /** Responde um pedido de permissão (rodar comando, editar arquivo...). */
+  async replyPermission(
+    sessionId: string,
+    requestId: string,
+    decision: 'once' | 'always' | 'reject'
+  ): Promise<boolean> {
+    if (!sessionId || !requestId) return false;
+
+    const payload = await this.request(`/api/session/${sessionId}/permission/${requestId}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    });
+    if (payload !== null) return true;
+    // Servidores antigos usam outro caminho e o campo "response".
+    const legacy = await this.request(`/api/session/${sessionId}/permissions/${requestId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ response: decision }),
+    });
+    return legacy !== null;
+  }
+
+  getDefaultModel(): ModelOption | null {
+    return defaultModel;
+  }
+
+  /** Agentes principais do PC (build tem ferramentas, plan só lê). */
+  async fetchAgents(): Promise<AgentOption[]> {
+    const payload = await this.request('/api/agent', undefined, true);
+    const list: any[] = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
+
+    return list
+      .filter((agent) => agent?.id && agent.hidden !== true && agent.mode !== 'subagent')
+      .map((agent) => ({
+        id: String(agent.id),
+        label: String(agent.name ?? agent.id),
+        description: typeof agent.description === 'string' ? agent.description : undefined,
+      }))
+      .sort((first, second) => first.label.localeCompare(second.label));
+  }
+
+  /** Permissão que está esperando resposta agora (o agente fica parado até isso). */
+  getPendingPermission() {
+    return useAppStore.getState().pendingPermission;
+  }
+
+  /** Recupera um pedido que já estava aberto quando o app entrou na sessão. */
+  async fetchPendingPermission(sessionId: string): Promise<void> {
+    if (!sessionId) return;
+    const payload = await this.request(`/api/session/${sessionId}/permission`, undefined, true);
+    const list: any[] = Array.isArray(payload?.data) ? payload.data : [];
+    const request = list.find((item) => item?.id);
+    if (request) useAppStore.getState().setPendingPermission(toPendingPermission(request, sessionId));
   }
 
   /**
@@ -823,11 +975,63 @@ class OpenCodeSSE {
 }
 
 
-/** Aceita os formatos de /config/providers, /provider, /config e /model. */
-function normalizeModels(payload: any): ModelOption[] {
+/** Converte um Permission.Request do servidor no formato que guardamos. */
+function toPendingPermission(request: any, fallbackSessionId: string): PendingPermission {
+  return {
+    id: String(request.id),
+    sessionID: String(request.sessionID ?? fallbackSessionId),
+    action: String(request.action ?? request.title ?? 'usar uma ferramenta'),
+    resources: Array.isArray(request.resources)
+      ? request.resources.map((item: any) => String(item))
+      : Array.isArray(request.patterns)
+        ? request.patterns.map((item: any) => String(item))
+        : [],
+    message: typeof request.message === 'string' ? request.message : undefined,
+    save: Array.isArray(request.save) ? request.save.map((item: any) => String(item)) : undefined,
+  };
+}
+
+let modelProbe = '';
+let defaultModel: ModelOption | null = null;
+
+/** De onde veio a última lista de modelos (para o aviso da folha de modelos). */
+export function getModelProbe(): string {
+  return modelProbe;
+}
+
+/** Modelo padrão do servidor (para voltar ao padrão sem adivinhar). */
+export function getDefaultModel(): ModelOption | null {
+  return defaultModel;
+}
+
+/** Aceita /api/model (Model.Info[]), /api/provider e /api/config/providers. */
+function normalizeModels(payload: any, providerNames?: Map<string, string>): ModelOption[] {
   const data = payload?.data ?? payload;
   const out: ModelOption[] = [];
   const seen = new Set<string>();
+
+  // Servidor novo: /api/model → { data: Model.Info[] }.
+  const modelInfos: any[] = Array.isArray(data) ? data : Array.isArray(data?.models) ? data.models : [];
+  for (const model of modelInfos) {
+    if (!model || typeof model !== 'object') continue;
+    const providerID = String(model.providerID ?? model.canonical ?? '');
+    const id = String(model.id ?? model.modelID ?? '');
+    if (!id || !providerID || model.enabled === false) continue;
+    const value = `${providerID}/${id}`;
+    if (seen.has(value)) continue;
+    seen.add(value);
+    out.push({
+      value,
+      label: String(model.name ?? id),
+      provider: providerNames?.get(providerID) ?? providerID,
+      providerID,
+      modelID: id,
+    });
+  }
+
+  if (out.length > 0) {
+    return out.sort((a, b) => a.provider.localeCompare(b.provider) || a.label.localeCompare(b.label));
+  }
 
   const addProvider = (providerId: string, providerName: string, models: any) => {
     if (!models) return;
