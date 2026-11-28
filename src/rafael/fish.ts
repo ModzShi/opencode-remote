@@ -89,37 +89,47 @@ function chunk(text: string): string[] {
 }
 
 async function synthesize(text: string, cfg: FishConfig, signal: AbortSignal): Promise<string> {
-  const response = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${ENV_KEY}`,
-      'Content-Type': 'application/json',
-      model: cfg.model,
-    },
-    body: JSON.stringify({
-      text,
-      reference_id: cfg.voice,
-      format: 'mp3',
-      mp3_bitrate: 128,
-      sample_rate: 44100,
-      normalize: true,
-      chunk_length: 100,
-      latency: 'low',
-      prosody: {
-        speed: cfg.speed,
-        volume: cfg.volume,
-        normalize_loudness: true,
+  // Se o Fish demorar demais, aborta: a voz nativa entra no lugar do silêncio.
+  const local = new AbortController();
+  const onAbort = () => local.abort();
+  signal.addEventListener('abort', onAbort);
+  const timeout = setTimeout(() => local.abort(), 15000);
+  try {
+    const response = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${ENV_KEY}`,
+        'Content-Type': 'application/json',
+        model: cfg.model,
       },
-    }),
-    signal,
-  });
+      body: JSON.stringify({
+        text,
+        reference_id: cfg.voice,
+        format: 'mp3',
+        mp3_bitrate: 128,
+        sample_rate: 44100,
+        normalize: true,
+        chunk_length: 100,
+        latency: 'low',
+        prosody: {
+          speed: cfg.speed,
+          volume: cfg.volume,
+          normalize_loudness: true,
+        },
+      }),
+      signal: local.signal,
+    });
 
-  if (!response.ok) throw new Error(`fish ${response.status}`);
+    if (!response.ok) throw new Error(`fish ${response.status}`);
 
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  const file = new File(Paths.cache, `rafael-${Date.now()}-${Math.round(Math.random() * 1e5)}.mp3`);
-  file.write(bytes);
-  return file.uri;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const file = new File(Paths.cache, `rafael-${Date.now()}-${Math.round(Math.random() * 1e5)}.mp3`);
+    file.write(bytes);
+    return file.uri;
+  } finally {
+    clearTimeout(timeout);
+    signal.removeEventListener('abort', onAbort);
+  }
 }
 
 function play(uri: string, signal: AbortSignal): Promise<void> {
