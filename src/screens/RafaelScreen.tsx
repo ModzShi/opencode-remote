@@ -69,10 +69,19 @@ function parseModelIntent(text: string): ModelIntent | null {
   }
 
   const match = value.match(MODEL_SWITCH);
-  const target = (match?.[1] ?? value.replace(/^.*?modelo\s*/, ''))
+  if (!match) {
+    // Sem verbo de troca, só vale algo curto ("modelo opus").
+    // Frases como "o modelo diz que não tem acesso" não são comando.
+    if (value.split(/\s+/).length > 3) return null;
+    const short = value.replace(/^.*?modelo\s*/, '').trim();
+    return short ? { kind: 'switch', target: short } : null;
+  }
+
+  const target = match[1]
     .replace(/^(chamado|chamada|que\s+e|que\s+se\s+chama)\s+/, '')
     .trim();
 
+  if (!target || target.length > 48) return null;
   return { kind: 'switch', target };
 }
 
