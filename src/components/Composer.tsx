@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { ArrowUp } from 'lucide-react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ArrowUp, FileText, Paperclip, X } from 'lucide-react-native';
 import { useTheme } from '@/hooks/useTheme';
 import { fonts, radius } from '@/theme';
+import type { ChatAttachment } from '@/types';
 
 interface ComposerProps {
   value: string;
@@ -11,6 +12,10 @@ interface ComposerProps {
   busy?: boolean;
   disabled?: boolean;
   placeholder?: string;
+  attachments?: ChatAttachment[];
+  onAttach?: () => void;
+  onRemoveAttachment?: (id: string) => void;
+  attaching?: boolean;
 }
 
 export function Composer({
@@ -20,13 +25,45 @@ export function Composer({
   busy = false,
   disabled = false,
   placeholder = 'Fale com o opencode…',
+  attachments = [],
+  onAttach,
+  onRemoveAttachment,
+  attaching = false,
 }: ComposerProps) {
   const { colors } = useTheme();
   const [focused, setFocused] = useState(false);
-  const canSend = value.trim().length > 0 && !disabled;
+  const canSend = (value.trim().length > 0 || attachments.length > 0) && !disabled;
 
   return (
     <View style={styles.wrapper}>
+      {attachments.length > 0 ? (
+        <View style={styles.attachments}>
+          {attachments.map((attachment) => (
+            <View
+              key={attachment.id}
+              style={[styles.chip, { backgroundColor: colors.secondary, borderColor: colors.border }]}
+            >
+              {attachment.kind === 'image' ? (
+                <Image source={{ uri: attachment.uri }} style={styles.chipThumb} />
+              ) : (
+                <FileText size={15} color={colors.primary} strokeWidth={2.2} />
+              )}
+              <Text numberOfLines={1} style={[styles.chipName, { color: colors.foreground }]}>
+                {attachment.name}
+              </Text>
+              <Pressable
+                onPress={() => onRemoveAttachment?.(attachment.id)}
+                hitSlop={9}
+                accessibilityRole="button"
+                accessibilityLabel={`Remover ${attachment.name}`}
+              >
+                <X size={13} color={colors.mutedForeground} strokeWidth={2.6} />
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
       <View
         style={[
           styles.box,
@@ -37,6 +74,23 @@ export function Composer({
           },
         ]}
       >
+        {onAttach ? (
+          <Pressable
+            onPress={onAttach}
+            disabled={disabled || attaching}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Anexar foto ou documento"
+            style={({ pressed }) => [styles.attach, { opacity: pressed ? 0.6 : 1 }]}
+          >
+            {attaching ? (
+              <ActivityIndicator size="small" color={colors.mutedForeground} />
+            ) : (
+              <Paperclip size={18} color={colors.mutedForeground} strokeWidth={2.2} />
+            )}
+          </Pressable>
+        ) : null}
+
         <TextInput
           value={value}
           onChangeText={onChangeText}
@@ -80,6 +134,27 @@ export function Composer({
 
 const styles = StyleSheet.create({
   wrapper: { paddingHorizontal: 12, paddingTop: 8 },
+  attachments: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7,
+    marginBottom: 7,
+    paddingHorizontal: 2,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingLeft: 8,
+    paddingRight: 7,
+    paddingVertical: 5,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    maxWidth: '92%',
+  },
+  chipThumb: { width: 20, height: 20, borderRadius: 5 },
+  chipName: { fontSize: 12, fontWeight: '600', maxWidth: 190 },
+  attach: { width: 30, height: 34, alignItems: 'center', justifyContent: 'center' },
   box: {
     flexDirection: 'row',
     alignItems: 'flex-end',

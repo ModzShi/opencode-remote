@@ -89,8 +89,10 @@ interface AppState {
 
 const defaultSettings: AppSettings = {
   theme: 'system',
+  accentPreset: 'neon',
   autoConnect: true,
   hapticsEnabled: true,
+  backgroundNotifications: true,
   fontSize: 14,
   showLineNumbers: true,
   compactMode: false,
@@ -104,9 +106,10 @@ const defaultSettings: AppSettings = {
   rafaelColorTo: '#9D8BFF',
   rafaelColorCycle: true,
   rafaelSummary: 'auto',
-  rafaelVoiceSpeed: 1.12,
-  rafaelVoiceVolume: 6,
+  rafaelVoiceSpeed: 1.25,
+  rafaelVoiceVolume: 10,
   rafaelAgentModel: '',
+  rafaelAgentVariant: '',
 };
 
 export const useAppStore = create<AppState>()(

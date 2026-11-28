@@ -15,6 +15,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import { useTheme } from '@/hooks/useTheme';
 import { useAppStore } from '@/store';
+import { ACCENT_PRESETS } from '@/theme/accents';
+import { Avatar } from '@/components/Avatar';
 import { Button, Card } from '@/components/ui';
 import { VoicePicker } from '@/components/VoicePicker';
 import { FISH_VOICES, voiceLabel } from '@/rafael/voices';
@@ -63,6 +65,7 @@ const VOICE_SPEEDS = [
   { value: '1.12', label: '1,12x' },
   { value: '1.25', label: '1,25x' },
   { value: '1.4', label: '1,4x' },
+  { value: '1.55', label: '1,55x' },
 ];
 
 const VOICE_VOLUMES = [
@@ -74,7 +77,7 @@ const VOICE_VOLUMES = [
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
 
   const settings = useAppStore((state) => state.settings);
   const setSettings = useAppStore((state) => state.setSettings);
@@ -170,6 +173,16 @@ export default function SettingsScreen() {
     >
       <Text style={[styles.pageTitle, { color: colors.foreground }]}>Ajustes</Text>
 
+      <View style={[styles.profileRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Avatar size={54} style={{ borderWidth: 1, borderColor: colors.border }} />
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={[styles.profileName, { color: colors.foreground }]}>OpenCode Remote</Text>
+          <Text style={[styles.profileHint, { color: colors.mutedForeground }]}>
+            {connectionStatus === 'connected' ? 'conectado ao seu PC' : 'seu PC no bolso'}
+          </Text>
+        </View>
+      </View>
+
       <Section title="Aparência">
         <View style={styles.themeRow}>
           {THEMES.map(({ value, label, icon: Icon }) => {
@@ -201,6 +214,52 @@ export default function SettingsScreen() {
               </Pressable>
             );
           })}
+        </View>
+
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+        <View style={styles.paddedRow}>
+          <Text style={[styles.rowLabel, { color: colors.foreground }]}>Cor de destaque</Text>
+          <Text style={[styles.rowHint, { color: colors.mutedForeground }]}>
+            Sub-cores prontas: {ACCENT_PRESETS.find((item) => item.id === (settings.accentPreset ?? 'neon'))?.name ?? 'Neon'}
+          </Text>
+          <View style={styles.accentRow}>
+            {ACCENT_PRESETS.map((preset) => {
+              const active = (settings.accentPreset ?? 'neon') === preset.id;
+              const tone = isDark ? preset.dark : preset.light;
+              return (
+                <Pressable
+                  key={preset.id}
+                  onPress={() => setSettings({ accentPreset: preset.id })}
+                  style={styles.accentItem}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Cor ${preset.name}`}
+                >
+                  <View
+                    style={[
+                      styles.accentDot,
+                      {
+                        backgroundColor: tone.primary,
+                        borderColor: active ? colors.foreground : 'transparent',
+                      },
+                    ]}
+                  >
+                    {active ? (
+                      <Check size={14} color={isDark ? '#00131A' : '#FFFFFF'} strokeWidth={3} />
+                    ) : null}
+                  </View>
+                  <Text
+                    style={[
+                      styles.accentLabel,
+                      { color: active ? colors.foreground : colors.mutedForeground },
+                    ]}
+                  >
+                    {preset.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
 
         <View style={[styles.divider, { backgroundColor: colors.border }]} />
@@ -270,6 +329,12 @@ export default function SettingsScreen() {
           hint="Feedback tátil nas ações"
           value={settings.hapticsEnabled}
           onChange={(value) => setSettings({ hapticsEnabled: value })}
+        />
+        <ToggleRow
+          label="Avisos em segundo plano"
+          hint="Notifica quando a tarefa termina ou pede permissão"
+          value={settings.backgroundNotifications ?? true}
+          onChange={(value) => setSettings({ backgroundNotifications: value })}
           last
         />
       </Section>
@@ -323,7 +388,7 @@ export default function SettingsScreen() {
           </Text>
           <Chips
             options={VOICE_SPEEDS}
-            value={String(settings.rafaelVoiceSpeed ?? 1.12)}
+            value={String(settings.rafaelVoiceSpeed ?? 1.25)}
             onChange={(value) => setSettings({ rafaelVoiceSpeed: Number(value) })}
           />
         </View>
@@ -337,7 +402,7 @@ export default function SettingsScreen() {
           </Text>
           <Chips
             options={VOICE_VOLUMES}
-            value={String(settings.rafaelVoiceVolume ?? 6)}
+            value={String(settings.rafaelVoiceVolume ?? 10)}
             onChange={(value) => setSettings({ rafaelVoiceVolume: Number(value) })}
           />
         </View>
@@ -668,6 +733,45 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.4,
     marginBottom: 2,
+  },
+  profileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 13,
+    padding: 13,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  profileName: {
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  profileHint: {
+    fontSize: 12,
+  },
+  accentRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 12,
+  },
+  accentItem: {
+    alignItems: 'center',
+    gap: 5,
+    width: 52,
+  },
+  accentDot: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  accentLabel: {
+    fontSize: 10.5,
+    fontWeight: '600',
   },
   section: {
     gap: 7,

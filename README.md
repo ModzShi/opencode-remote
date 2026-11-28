@@ -4,13 +4,30 @@ App nativo iOS (React Native + Expo) para controlar o **OpenCode** do seu PC rem
 
 ## ✨ Features
 
-- 📷 **Scan QR Code nativo** - Usa `expo-barcode-scanner` para ler o QR do terminal
-- ⌨️ **Terminal completo** - Input nativo, histórico, autocomplete, comandos rápidos
-- 🎨 **Tema adaptativo** - Claro/Escuro/Sistema, fontes configuráveis (12-20px)
-- ⚡ **Performance nativa** - 60fps, reanimated, haptics, gestos
-- 🔒 **Seguro** - Armazenamento criptografado (expo-secure-store), sem cloud
-- 📦 **Compacto** - ~15MB IPA, instala via esign/Sideloadly/AltStore
+- 📷 **Scan QR Code nativo** - Lê o QR do `opencode pair --remote` direto da câmera
+- ⌨️ **Chat completo** - Histórico, streaming, ferramentas, permissões e comandos rápidos
+- 🖼️ **Fotos e documentos** - Anexe imagens da galeria ou arquivos do iPhone no chat
+- 🧠 **Modelos e variantes** - Escolha o modelo e o esforço (`high`, `medium`, `low`…) por sessão
+- 📚 **Biblioteca** - Skills com descrição completa, plugins instalados e subagentes do PC
+- 🎨 **Temas e sub-cores** - Claro/Escuro/Sistema + presets de cor (neon, aurora, violeta…)
+- 🔔 **Avisos de tarefa** - Notificação quando o agente termina, falha ou pede permissão
+- 🔮 **Rafael** - Orbe original, voz Fish Audio mais rápida e legendas em português
+- ✨ **Design** - Ícone orbital novo e animação de raciocínio no estilo Claude
+- 🔒 **Seguro** - Tudo direto no seu PC, sem nuvem
+- 📦 **Compacto** - IPA enxuto, instala via esign/Sideloadly/AltStore
 - ⚙️ **Totalmente configurável** - Auto-connect, keep-alive, compact mode, etc.
+
+### 🆕 v1.3.0
+
+- Variantes de modelo na troca de modelo (chat e Rafael)
+- Orbe original restaurado, sem alterações de cor
+- Fotos de perfil do tema escuro/claro nos avatares vazios
+- Presets de sub-cor nas Configurações
+- Voz do Rafael mais rápida (1.25x padrão), com fallback para a voz do sistema
+- Envio de imagens e documentos pelo chat
+- Nova aba **Biblioteca**: skills, plugins e criação de subagentes
+- Notificações locais de status da tarefa em segundo plano
+- Ícone orbital e animação de "analisando" nas respostas
 
 ## 🚀 Como obter o IPA (sem Mac)
 
@@ -87,6 +104,7 @@ Se não quiser usar câmera:
 | Opção | Descrição |
 |-------|-----------|
 | **Tema** | Sistema / Claro / Escuro |
+| **Sub-cor** | Neon, Aurora, Violeta, Ember, Gelo ou Mono |
 | **Tamanho da Fonte** | 12-20px (botões rápidos) |
 | **Números de Linha** | Mostra numeração no terminal |
 | **Modo Compacto** | Reduz espaçamento vertical |
@@ -94,6 +112,9 @@ Se não quiser usar câmera:
 | **Manter Conexão** | WebSocket ativo em background |
 | **Auto-conectar** | Reconecta ao abrir o app |
 | **Feedback Tátil** | Vibração em ações |
+| **Avisos em segundo plano** | Notifica fim, falha ou permissão pedida |
+| **Voz do Rafael** | Voz Fish Audio, modelo TTS, velocidade e volume |
+| **Orbe** | Original, Plasma, Siri Wave ou Mercury |
 
 ## 🏗️ Desenvolvimento
 

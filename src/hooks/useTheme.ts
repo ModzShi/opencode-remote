@@ -1,6 +1,7 @@
 import { useColorScheme } from 'react-native';
 import { useAppStore } from '@/store';
 import { palettes, ThemeColors } from '@/theme';
+import { withAccent } from '@/theme/accents';
 
 export function useTheme() {
   const systemColorScheme = useColorScheme();
@@ -9,7 +10,8 @@ export function useTheme() {
   const colorScheme =
     themeSetting === 'system' ? systemColorScheme ?? 'dark' : themeSetting;
 
-  const colors: ThemeColors = palettes[colorScheme];
+  const accentPreset = useAppStore((state) => state.settings.accentPreset);
+  const colors: ThemeColors = withAccent(palettes[colorScheme], colorScheme, accentPreset);
 
   return {
     colorScheme,

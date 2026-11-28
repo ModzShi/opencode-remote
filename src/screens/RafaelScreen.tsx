@@ -21,8 +21,9 @@ import { haptic } from '@/utils/haptics';
 import { Orb, findOrbStyle, type OrbState } from '@/rafael/Orb';
 import { getDefaultModel, getModelProbe, refreshModels, useModels } from '@/rafael/models';
 import { ModelSheet } from '@/components/ModelSheet';
-import { speak, stopSpeaking, voiceReady } from '@/rafael/voice';
+import { speak, stopSpeaking, voiceReady, warmVoice } from '@/rafael/voice';
 import type { AgentOption, ModelOption } from '@/types';
+import { modelDisplayLabel } from '@/utils/models';
 
 // A escuta nativa só existe se o binário tiver o módulo instalado.
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -126,6 +127,7 @@ export function RafaelScreen() {
   const colorTo = useAppStore((state) => state.settings.rafaelColorTo) ?? '#9D8BFF';
   const cycle = useAppStore((state) => state.settings.rafaelColorCycle) ?? true;
   const agentModel = useAppStore((state) => state.settings.rafaelAgentModel);
+  const agentVariant = useAppStore((state) => state.settings.rafaelAgentVariant);
   const setSettings = useAppStore((state) => state.setSettings);
 
   const [draft, setDraft] = useState('');
@@ -151,7 +153,11 @@ export function RafaelScreen() {
   const running = session?.status === 'running';
   const pendingPermission = useAppStore((state) => state.pendingPermission);
   const chosenModel = models.find((model) => model.value === agentModel);
-  const modelLabel = agentModel ? chosenModel?.label ?? agentModel : 'modelo padrão';
+  const modelLabel = agentModel
+    ? chosenModel
+      ? modelDisplayLabel({ ...chosenModel, variant: agentVariant })
+      : `${agentModel}${agentVariant ? ` · ${agentVariant}` : ''}`
+    : 'modelo padrão';
 
   const lastAssistant = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -203,11 +209,11 @@ export function RafaelScreen() {
   const appliedModel = useRef('');
   useEffect(() => {
     if (!activeSessionId || !agentModel) return;
-    const key = `${activeSessionId}:${agentModel}`;
+    const key = `${activeSessionId}:${agentModel}:${agentVariant ?? ''}`;
     if (appliedModel.current === key) return;
     appliedModel.current = key;
-    void websocket.setSessionModel(activeSessionId, { value: agentModel });
-  }, [activeSessionId, agentModel]);
+    void websocket.setSessionModel(activeSessionId, { value: agentModel, variant: agentVariant || undefined });
+  }, [activeSessionId, agentModel, agentVariant]);
 
   // Um pedido de permissão pode já estar aberto (agente parado esperando).
   useEffect(() => {
@@ -242,6 +248,10 @@ export function RafaelScreen() {
     speak(text);
   }, [lastAssistant, listening]);
 
+  useEffect(() => {
+    warmVoice();
+  }, []);
+
   useEffect(() => () => {
     stopSpeaking();
     if (sendTimer.current) clearTimeout(sendTimer.current);
@@ -274,7 +284,10 @@ export function RafaelScreen() {
   const applyModel = useCallback(
     async (option: ModelOption | null) => {
       haptic('tap');
-      setSettings({ rafaelAgentModel: option?.value ?? '' });
+      setSettings({
+        rafaelAgentModel: option?.value ?? '',
+        rafaelAgentVariant: option?.variant ?? '',
+      });
       if (!activeSessionId) {
         setNotice(null);
         return;
@@ -303,9 +316,10 @@ export function RafaelScreen() {
         return;
       }
 
-      setNotice(option ? `modelo: ${target.label}` : `padrão: ${target.label}`);
+      const spoken = modelDisplayLabel(target);
+      setNotice(option ? `modelo: ${spoken}` : `padrão: ${spoken}`);
       if (voiceReady.speech) {
-        speak(option ? `Modelo trocado para ${target.label}.` : `Voltei para ${target.label}.`);
+        speak(option ? `Modelo trocado para ${spoken}.` : `Voltei para ${spoken}.`);
       }
     },
     [activeSessionId, setSettings]
@@ -721,7 +735,7 @@ export function RafaelScreen() {
 
       <ModelSheet
         visible={modelSheet}
-        selected={agentModel ?? ''}
+        selected={agentModel ? `${agentModel}${agentVariant ? `#${agentVariant}` : ''}` : ''}
         models={models}
         loading={modelsLoading}
         probe={modelsProbe}

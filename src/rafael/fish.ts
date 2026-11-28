@@ -37,8 +37,8 @@ function config(): FishConfig {
     summary: settings.rafaelSummary ?? 'auto',
     // Voz um pouco mais rápida e mais alta: o padrão do Fish sai baixo e lento
     // no alto-falante do iPhone.
-    speed: clamp(settings.rafaelVoiceSpeed ?? 1.12, 0.5, 2),
-    volume: clamp(settings.rafaelVoiceVolume ?? 6, -10, 15),
+    speed: clamp(settings.rafaelVoiceSpeed ?? 1.25, 0.5, 2),
+    volume: clamp(settings.rafaelVoiceVolume ?? 10, -10, 15),
   };
 }
 
@@ -71,13 +71,15 @@ function chunk(text: string): string[] {
   const out: string[] = [];
   let buffer = '';
   for (const piece of pieces) {
-    if (buffer.length > 0 && (buffer + piece).length > 80) {
+    if (buffer.length > 0 && (buffer + piece).length > 150) {
       out.push(buffer.trim());
       buffer = '';
     }
     buffer += piece;
-    // Frase curta já pode ir sozinha: reduz o tempo até o primeiro áudio.
-    if (buffer.trim().length > 60 && /[.!?…]$/.test(buffer.trim())) {
+    // O primeiro pedaço é curto (áudio começa antes); os outros são maiores
+    // para reduzir o número de requisições e os intervalos entre frases.
+    const limit = out.length === 0 ? 70 : 150;
+    if (buffer.trim().length >= limit && /[.!?…,]$/.test(buffer.trim())) {
       out.push(buffer.trim());
       buffer = '';
     }
@@ -102,7 +104,7 @@ async function synthesize(text: string, cfg: FishConfig, signal: AbortSignal): P
       sample_rate: 44100,
       normalize: true,
       chunk_length: 100,
-      latency: 'balanced',
+      latency: 'low',
       prosody: {
         speed: cfg.speed,
         volume: cfg.volume,
@@ -123,9 +125,11 @@ async function synthesize(text: string, cfg: FishConfig, signal: AbortSignal): P
 function play(uri: string, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     let done = false;
+    let guard: ReturnType<typeof setTimeout> | null = null;
     const finish = () => {
       if (done) return;
       done = true;
+      if (guard) clearTimeout(guard);
       subscription.remove();
       resolve();
     };
@@ -141,6 +145,10 @@ function play(uri: string, signal: AbortSignal): Promise<void> {
       if (status.didJustFinish) finish();
     });
 
+    // Se o player travar (arquivo corrompido, interrupção do sistema), não
+    // deixa a fila de frases parada para sempre.
+    guard = setTimeout(finish, 45000);
+
     signal.addEventListener('abort', () => {
       try {
         next.pause();
@@ -152,6 +160,20 @@ function play(uri: string, signal: AbortSignal): Promise<void> {
 
     next.play();
   });
+}
+
+/** Prepara a sessão de áudio antes do primeiro toque (menos atraso). */
+export async function warmFish(): Promise<void> {
+  try {
+    await setAudioModeAsync({
+      allowsRecording: false,
+      playsInSilentMode: true,
+      shouldRouteThroughEarpiece: false,
+      interruptionMode: 'doNotMix',
+    });
+  } catch {
+    // segue com o modo atual
+  }
 }
 
 export function stopFish(): void {
@@ -171,8 +193,12 @@ export function stopFish(): void {
   player = null;
 }
 
-/** Fala com a voz do Fish. Retorna false quando não há chave configurada. */
-export function speakFish(text: string): boolean {
+/**
+ * Fala com a voz do Fish. Retorna false quando não há chave configurada.
+ * Se a nuvem falhar logo no primeiro pedaço, chama onFail para o app usar a
+ * voz nativa — melhor uma voz diferente do que silêncio.
+ */
+export function speakFish(text: string, onFail?: (speech: string) => void): boolean {
   if (!fishReady) return false;
   const cfg = config();
   const speech = spokenText(text, cfg.summary);
@@ -187,33 +213,36 @@ export function speakFish(text: string): boolean {
   controller = ac;
 
   void (async () => {
-    try {
-      await setAudioModeAsync({
-        allowsRecording: false,
-        playsInSilentMode: true,
-        shouldRouteThroughEarpiece: false,
-      });
-    } catch {
-      // segue com o modo atual
-    }
+    // Mantém dois pedaços em voo: o próximo já chega pronto enquanto o atual toca.
+    const jobs: (Promise<string> | null)[] = parts.map(() => null);
+    const startJob = (index: number) => {
+      if (index >= parts.length || jobs[index]) return;
+      const job = synthesize(parts[index], cfg, ac.signal);
+      job.catch(() => undefined);
+      jobs[index] = job;
+    };
+    startJob(0);
+    startJob(1);
+    await warmFish();
 
-    // Sintetiza a próxima frase enquanto a atual toca: o áudio sai sem pausas.
-    let pending: Promise<string> | null = null;
     for (let index = 0; index < parts.length; index += 1) {
       if (generation !== mine || ac.signal.aborted) return;
       try {
-        const uri = pending
-          ? await pending
-          : await synthesize(parts[index], cfg, ac.signal);
-        pending = null;
-        if (generation !== mine || ac.signal.aborted) return;
-        if (index + 1 < parts.length) {
-          pending = synthesize(parts[index + 1], cfg, ac.signal);
-          pending.catch(() => undefined);
+        const job = jobs[index];
+        if (!job) {
+          startJob(index);
+          if (!jobs[index]) return;
         }
+        const uri = await jobs[index]!;
+        if (generation !== mine || ac.signal.aborted) return;
+        startJob(index + 2);
         await play(uri, ac.signal);
       } catch {
-        pending = null;
+        if (ac.signal.aborted || generation !== mine) return;
+        if (index === 0) {
+          onFail?.(speech);
+          return;
+        }
         // uma frase falhou: tenta a próxima
       }
     }

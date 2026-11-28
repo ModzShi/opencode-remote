@@ -1,20 +1,23 @@
 import React from 'react';
+import { ClassicOrb } from './ClassicOrb';
 import { MercuryOrb } from './MercuryOrb';
 import { ParticleOrb, type OrbState } from './ParticleOrb';
 import { SiriWaveOrb } from './SiriWaveOrb';
 
 export type { OrbState };
 
-export type OrbStyle = 'particles' | 'siri' | 'mercury';
+export type OrbStyle = 'particles' | 'plasma' | 'siri' | 'mercury';
 
 export const ORB_STYLES: { id: OrbStyle; name: string; hint: string }[] = [
-  { id: 'particles', name: 'Partículas', hint: 'o orbe original' },
+  { id: 'particles', name: 'Original', hint: 'o orbe de partículas do começo, intacto' },
+  { id: 'plasma', name: 'Plasma', hint: 'partículas com as suas cores' },
   { id: 'siri', name: 'Siri Wave', hint: 'ondas suaves' },
   { id: 'mercury', name: 'Mercury', hint: 'líquido metálico' },
 ];
 
 export function findOrbStyle(id?: string | null): OrbStyle {
-  return id === 'siri' || id === 'mercury' ? id : 'particles';
+  if (id === 'plasma' || id === 'siri' || id === 'mercury') return id;
+  return 'particles';
 }
 
 interface OrbProps {
@@ -31,6 +34,9 @@ interface OrbProps {
 }
 
 export function Orb({ size, state, style = 'particles', colorFrom, colorTo, cycle, levelRef, animate = true }: OrbProps) {
+  if (style === 'particles') {
+    return <ClassicOrb size={size} state={state} levelRef={levelRef} animate={animate} />;
+  }
   if (style === 'siri') {
     return (
       <SiriWaveOrb

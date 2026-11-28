@@ -9,8 +9,28 @@ export interface ModelOption {
   providerID?: string;
   /** id do modelo no servidor (ex.: 'claude-sonnet-4'). */
   modelID?: string;
+  /** variante escolhida (ex.: 'high', 'low', 'thinking'). */
+  variant?: string;
+  /** variantes publicadas pelo PC para este modelo. */
+  variants?: string[];
   /** true quando é o modelo padrão do servidor. */
   isDefault?: boolean;
+}
+
+/** Arquivo anexado no chat (foto ou documento). */
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  uri: string;
+  mimeType: string;
+  size: number;
+  kind: 'image' | 'file';
+}
+
+/** Arquivo no formato que o /prompt aceita. */
+export interface PromptFile {
+  uri: string;
+  name?: string;
 }
 
 /** Agente do OpenCode (quem executa: build tem ferramentas, plan só lê...). */
@@ -18,6 +38,32 @@ export interface AgentOption {
   id: string;
   label: string;
   description?: string;
+  mode?: 'primary' | 'subagent' | 'all';
+}
+
+/** Skill publicada pelo PC (SKILL.md + metadados). */
+export interface SkillInfo {
+  id: string;
+  name: string;
+  description?: string;
+  autoinvoke?: boolean;
+  path: string;
+  content: string;
+}
+
+/** Plugin instalado no OpenCode do PC. */
+export interface PluginInfo {
+  id?: string;
+  source: string;
+  features: string[];
+  state: string;
+}
+
+/** Entrada de /api/config: aponta onde ficam os arquivos de configuração. */
+export interface ConfigEntry {
+  type: 'document' | 'directory';
+  path?: string;
+  info?: Record<string, unknown>;
 }
 
 /** Pedido de permissão que o agente do PC está esperando para continuar. */
@@ -99,8 +145,12 @@ export interface PairingData {
 
 export interface AppSettings {
   theme: 'system' | 'light' | 'dark';
+  /** Sub-cor pronta do app (id de ACCENT_PRESETS). */
+  accentPreset?: string;
   autoConnect: boolean;
   hapticsEnabled: boolean;
+  /** Notificação local quando a tarefa termina ou pede permissão. */
+  backgroundNotifications?: boolean;
   fontSize: number;
   showLineNumbers: boolean;
   compactMode: boolean;
@@ -128,6 +178,8 @@ export interface AppSettings {
   rafaelVoiceVolume?: number;
   /** Modelo do agente escolhido no app (Rafael e chat). */
   rafaelAgentModel?: string;
+  /** Variante escolhida do modelo (high/low/thinking...). */
+  rafaelAgentVariant?: string;
 }
 
 export interface QRCodeData {

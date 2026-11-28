@@ -20,8 +20,9 @@ type AudioModule = {
 
 type FishModule = {
   fishReady: boolean;
-  speakFish: (text: string) => boolean;
+  speakFish: (text: string, onFail?: (speech: string) => void) => boolean;
   stopFish: () => void;
+  warmFish?: () => Promise<void>;
 };
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -57,7 +58,7 @@ let speaking = false;
 
 function speakNative(clean: string) {
   if (!Speech) return;
-  const speed = useAppStore.getState().settings.rafaelVoiceSpeed ?? 1.12;
+  const speed = useAppStore.getState().settings.rafaelVoiceSpeed ?? 1.25;
   // Depois do microfone o iOS pode continuar no modo "gravar", que toca no
   // alto-falante de ouvido (bem baixo). Volta para o alto-falante normal.
   void Audio?.setAudioModeAsync({
@@ -97,7 +98,12 @@ export function speak(text: string) {
 
   if (Fish?.fishReady) {
     try {
-      if (Fish.speakFish(clean)) {
+      if (
+        Fish.speakFish(clean, (speech) => {
+          // A nuvem falhou: usa a voz do sistema para não ficar em silêncio.
+          speakNative(speech.slice(0, 600));
+        })
+      ) {
         speaking = true;
         return;
       }
@@ -107,6 +113,20 @@ export function speak(text: string) {
   }
 
   speakNative(clean.slice(0, 600));
+}
+
+/** Aquece o modo de áudio (chamado ao abrir o Rafael). */
+export function warmVoice() {
+  if (Fish?.warmFish) {
+    void Fish.warmFish().catch(() => undefined);
+    return;
+  }
+  void Audio?.setAudioModeAsync({
+    allowsRecording: false,
+    playsInSilentMode: true,
+    shouldRouteThroughEarpiece: false,
+    interruptionMode: 'doNotMix',
+  }).catch(() => undefined);
 }
 
 export function stopSpeaking() {

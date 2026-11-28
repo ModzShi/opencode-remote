@@ -15,6 +15,8 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { ChevronDown, Cpu, Download, Plus, QrCode, RefreshCw, Sparkles } from 'lucide-react-native';
@@ -24,7 +26,9 @@ import { websocket } from '@/utils/websocket';
 import { haptic } from '@/utils/haptics';
 import { basename, formatCount } from '@/utils/format';
 import { checkForUpdate } from '@/utils/updates';
-import { AgentOption, ModelOption, OpenCodeMessage } from '@/types';
+import { AgentOption, ChatAttachment, ModelOption, OpenCodeMessage, PromptFile } from '@/types';
+import { modelDisplayLabel, splitModelRef } from '@/utils/models';
+import { MAX_ATTACHMENT_BYTES, formatBytes, guessMimeType, toPromptFile } from '@/utils/attachments';
 import { MessageItem } from '@/components/MessageItem';
 import { Composer } from '@/components/Composer';
 import { ModelSheet } from '@/components/ModelSheet';
@@ -84,6 +88,8 @@ export function TerminalScreen() {
   const [modelsProbe, setModelsProbe] = useState('');
   const [agents, setAgents] = useState<AgentOption[]>([]);
   const [picked, setPicked] = useState<{ session: string | null; value: string } | null>(null);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attaching, setAttaching] = useState(false);
   const pendingPermission = useAppStore((state) => state.pendingPermission);
   const setSettings = useAppStore((state) => state.setSettings);
 
@@ -125,8 +131,13 @@ export function TerminalScreen() {
   const preferredModel = useAppStore((state) => state.settings.rafaelAgentModel);
   const pickedValue = picked && picked.session === activeSessionId ? picked.value : '';
   const modelValue = pickedValue || activeSession?.model || preferredModel || '';
-  const currentModel = models.find((model) => model.value === modelValue);
-  const modelLabel = currentModel?.label ?? (modelValue ? modelValue.split('/').pop() ?? modelValue : 'modelo padrão');
+  const { base: modelBase, variant: modelVariant } = splitModelRef(modelValue);
+  const currentModel = models.find((model) => model.value === modelBase);
+  const modelLabel = currentModel
+    ? modelDisplayLabel({ ...currentModel, variant: modelVariant })
+    : modelValue
+      ? `${modelBase.split('/').pop() ?? modelBase}${modelVariant ? ` · ${modelVariant}` : ''}`
+      : 'modelo padrão';
 
   const openModels = useCallback(() => {
     haptic('light');
@@ -162,14 +173,15 @@ export function TerminalScreen() {
       }
 
       haptic('tap');
-      setSettings({ rafaelAgentModel: option?.value ?? '' });
+      setSettings({ rafaelAgentModel: target.value, rafaelAgentVariant: target.variant ?? '' });
       const ok = await websocket.setSessionModel(activeSessionId, target);
       if (!ok) {
         setNotice('O PC não aceitou trocar o modelo');
         return;
       }
-      setPicked({ session: activeSessionId, value: target.value });
-      setNotice(option ? `modelo: ${target.label}` : `padrão: ${target.label}`);
+      const stored = target.variant ? `${target.value}#${target.variant}` : target.value;
+      setPicked({ session: activeSessionId, value: stored });
+      setNotice(option ? `modelo: ${modelDisplayLabel(target)}` : `padrão: ${modelDisplayLabel(target)}`);
     },
     [activeSessionId, setSettings]
   );
@@ -207,6 +219,84 @@ export function TerminalScreen() {
     },
     [applyModel]
   );
+
+  const addAttachment = useCallback((attachment: ChatAttachment) => {
+    if (attachment.size > MAX_ATTACHMENT_BYTES) {
+      haptic('error');
+      setNotice(`${attachment.name} passa de ${formatBytes(MAX_ATTACHMENT_BYTES)}`);
+      return;
+    }
+    setAttachments((current) => {
+      if (current.length >= 4) {
+        setNotice('Máximo de 4 anexos por mensagem');
+        return current;
+      }
+      return [...current, attachment];
+    });
+  }, []);
+
+  const pickImage = useCallback(async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setNotice('Permita o acesso às fotos nos ajustes do iPhone');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: false,
+        quality: 0.7,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      const name = asset.fileName || `foto-${Date.now()}.jpg`;
+      addAttachment({
+        id: `img-${Date.now()}`,
+        name,
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? guessMimeType(name, 'image/jpeg'),
+        size: asset.fileSize ?? 0,
+        kind: 'image',
+      });
+    } catch {
+      setNotice('Não consegui abrir a galeria');
+    }
+  }, [addAttachment]);
+
+  const pickDocument = useCallback(async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      addAttachment({
+        id: `doc-${Date.now()}`,
+        name: asset.name,
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? guessMimeType(asset.name),
+        size: asset.size ?? 0,
+        kind: 'file',
+      });
+    } catch {
+      setNotice('Não consegui abrir os documentos');
+    }
+  }, [addAttachment]);
+
+  const openAttachMenu = useCallback(() => {
+    haptic('light');
+    Alert.alert('Anexar ao chat', 'O arquivo vai junto com a sua mensagem para o PC.', [
+      { text: 'Foto', onPress: () => void pickImage() },
+      { text: 'Documento', onPress: () => void pickDocument() },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
+  }, [pickDocument, pickImage]);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((current) => current.filter((item) => item.id !== id));
+  }, []);
 
   const lastMessage = messages[messages.length - 1];
 
@@ -253,7 +343,8 @@ export function TerminalScreen() {
 
   const handleSend = useCallback(async () => {
     const text = draft.trim();
-    if (!text) return;
+    const pending = attachments;
+    if (!text && pending.length === 0) return;
     if (!activeSessionId) {
       setNotice('Selecione ou crie uma sessão primeiro.');
       return;
@@ -265,16 +356,34 @@ export function TerminalScreen() {
     }
 
     setDraft('');
+    setAttachments([]);
     haptic('tap');
     follow.current = true;
 
-    const ok = await websocket.sendCommand(text, activeSessionId);
+    let files: PromptFile[] = [];
+    if (pending.length > 0) {
+      setAttaching(true);
+      try {
+        files = await Promise.all(pending.map(toPromptFile));
+      } catch (error) {
+        setAttaching(false);
+        haptic('error');
+        setDraft(text);
+        setAttachments(pending);
+        setNotice(error instanceof Error ? error.message : 'Não consegui preparar o anexo');
+        return;
+      }
+      setAttaching(false);
+    }
+
+    const ok = await websocket.sendCommand(text || 'Analise o anexo.', activeSessionId, files);
     if (!ok) {
       haptic('error');
       setDraft(text);
+      setAttachments(pending);
       setNotice('Não foi possível enviar. Verifique a conexão com o PC.');
     }
-  }, [draft, activeSessionId]);
+  }, [draft, attachments, activeSessionId]);
 
 
   const handleRefresh = useCallback(async () => {
@@ -534,8 +643,12 @@ export function TerminalScreen() {
             value={draft}
             onChangeText={setDraft}
             onSend={handleSend}
-            busy={running && !draft.trim()}
+            busy={running && !draft.trim() && attachments.length === 0}
             placeholder={connected ? 'Fale com o opencode…' : 'Sem conexão com o PC…'}
+            attachments={attachments}
+            onAttach={openAttachMenu}
+            onRemoveAttachment={removeAttachment}
+            attaching={attaching}
           />
         </View>
       </KeyboardAvoidingView>

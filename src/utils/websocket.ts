@@ -1,6 +1,28 @@
 import { useAppStore } from '@/store';
 import { pushEnergy } from '@/rafael/signal';
-import { AgentOption, MessagePart, ModelOption, OpenCodeMessage, OpenCodeSession, PairingData, PendingPermission } from '@/types';
+import {
+  AgentOption,
+  ConfigEntry,
+  MessagePart,
+  ModelOption,
+  OpenCodeMessage,
+  OpenCodeSession,
+  PairingData,
+  PendingPermission,
+  PluginInfo,
+  PromptFile,
+  SkillInfo,
+} from '@/types';
+import { notifyTask, primeNotifications } from '@/utils/notifications';
+import {
+  agentDirectory,
+  agentMarkdown,
+  agentSlug,
+  configEntries,
+  joinPath,
+  normalizePlugins,
+  normalizeSkills,
+} from '@/utils/library';
 import { basicAuthHeader } from './base64';
 import { buildSseEndpoint, exchangePairingCode } from './pairing';
 
@@ -327,11 +349,22 @@ class OpenCodeSSE {
       }
 
       case 'session.execution.started':
-        if (sessionId) store.updateSession(sessionId, { status: 'running', lastActivity: created });
+        if (sessionId) {
+          store.updateSession(sessionId, { status: 'running', lastActivity: created });
+          primeNotifications();
+        }
         break;
 
       case 'session.execution.succeeded':
-        if (sessionId) store.updateSession(sessionId, { status: 'idle', lastActivity: created });
+        if (sessionId) {
+          store.updateSession(sessionId, { status: 'idle', lastActivity: created });
+          const name = store.sessions.find((item) => item.id === sessionId)?.name;
+          void notifyTask(
+            `done:${sessionId}`,
+            'Tarefa concluída',
+            name ? `${name} terminou no PC.` : 'O agente terminou no PC.'
+          );
+        }
         break;
 
       case 'session.execution.failed':
@@ -345,6 +378,11 @@ class OpenCodeSSE {
               error: data.error?.message ?? data.message ?? 'A execução falhou no servidor.',
             }));
           }
+          void notifyTask(
+            `fail:${sessionId}`,
+            'Tarefa falhou',
+            data.error?.message ?? data.message ?? 'A execução falhou no PC.'
+          );
         }
         break;
 
@@ -365,6 +403,11 @@ class OpenCodeSSE {
           message: request?.message ?? data?.message,
           save: Array.isArray(request?.save) ? request.save.map((item: any) => String(item)) : undefined,
         });
+        void notifyTask(
+          `ask:${id}`,
+          'O agente precisa de você',
+          `Pedido de permissão: ${String(request?.action ?? data?.action ?? data?.title ?? 'usar uma ferramenta')}`
+        );
         break;
       }
 
@@ -684,10 +727,11 @@ class OpenCodeSSE {
         workingDirectory: item.location?.directory ?? '',
         lastActivity: item.time?.updated ?? Date.now(),
         agent: typeof item.agent === 'string' ? item.agent : undefined,
-        model:
-          typeof item.model?.id === 'string'
-            ? [item.model.providerID, item.model.id].filter(Boolean).join('/')
-            : undefined,
+        model: item.model?.id
+          ? `${[item.model.providerID, item.model.id].filter(Boolean).join('/')}${
+              item.model.variant ? `#${item.model.variant}` : ''
+            }`
+          : undefined,
       }))
       .sort((a: OpenCodeSession, b: OpenCodeSession) => b.lastActivity - a.lastActivity);
 
@@ -780,13 +824,16 @@ class OpenCodeSSE {
    * Send a prompt/message to a session via HTTP POST.
    * Uses /api/session/:sessionID/prompt endpoint (body: { text }).
    */
-  async sendCommand(command: string, sessionId: string): Promise<boolean> {
+  async sendCommand(command: string, sessionId: string, files?: PromptFile[]): Promise<boolean> {
     if (!sessionId) return false;
+
+    const body: Record<string, unknown> = { text: command };
+    if (files && files.length > 0) body.files = files;
 
     const payload = await this.request(`/api/session/${sessionId}/prompt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: command }),
+      body: JSON.stringify(body),
     });
 
     return payload !== null;
@@ -796,17 +843,25 @@ class OpenCodeSSE {
    * Troca o modelo da sessão no PC. Vale para os próximos prompts e é o único
    * jeito de escolher o modelo: /prompt não aceita o campo "model".
    */
-  async setSessionModel(sessionId: string, model: Pick<ModelOption, 'value' | 'providerID' | 'modelID'>): Promise<boolean> {
+  async setSessionModel(
+    sessionId: string,
+    model: Pick<ModelOption, 'value' | 'providerID' | 'modelID'> & { variant?: string }
+  ): Promise<boolean> {
     if (!sessionId || !model.value) return false;
     const slash = model.value.indexOf('/');
     const providerID = model.providerID ?? (slash > 0 ? model.value.slice(0, slash) : '');
-    const id = model.modelID ?? (slash > 0 ? model.value.slice(slash + 1) : model.value);
+    const raw = model.modelID ?? (slash > 0 ? model.value.slice(slash + 1) : model.value);
+    const id = raw.split('#')[0];
+    const variant = model.variant ?? (raw.includes('#') ? raw.split('#')[1] : undefined);
     if (!providerID || !id) return false;
+
+    const ref: Record<string, string> = { providerID, id };
+    if (variant) ref.variant = variant;
 
     const payload = await this.request(`/api/session/${sessionId}/model`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: { providerID, id } }),
+      body: JSON.stringify({ model: ref }),
     });
 
     return payload !== null;
@@ -837,6 +892,63 @@ class OpenCodeSSE {
 
   getDefaultModel(): ModelOption | null {
     return defaultModel;
+  }
+
+  /** Skills disponíveis no PC (projeto + globais). */
+  async fetchSkills(): Promise<SkillInfo[]> {
+    const payload = await this.request('/api/skill', undefined, true);
+    return normalizeSkills(payload);
+  }
+
+  /** Plugins instalados no OpenCode do PC. */
+  async fetchPlugins(): Promise<PluginInfo[]> {
+    const payload = await this.request('/api/plugin', undefined, true);
+    return normalizePlugins(payload);
+  }
+
+  /** Descobre onde ficam os arquivos de configuração (para criar agentes). */
+  async fetchConfigEntries(): Promise<ConfigEntry[]> {
+    const payload = await this.request('/api/config', undefined, true);
+    return configEntries(payload);
+  }
+
+  /** Cria um subagente em agent/<nome>.md ao lado da configuração do PC. */
+  async createSubagent(input: {
+    name: string;
+    description: string;
+    instructions: string;
+  }): Promise<{ ok: boolean; path?: string; error?: string }> {
+    const entries = await this.fetchConfigEntries();
+    const directory = agentDirectory(entries);
+    if (!directory) {
+      return { ok: false, error: 'Não achei a pasta de configuração do OpenCode no PC' };
+    }
+    const slug = agentSlug(input.name);
+    if (!slug) return { ok: false, error: 'Escolha um nome com letras ou números' };
+    const path = joinPath(directory, `${slug}.md`);
+    const payload = await this.request(`/api/experimental/fs/write?path=${encodeURIComponent(path)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: agentMarkdown(input),
+    });
+    if (payload === null) {
+      return { ok: false, error: 'O PC não deixou escrever na pasta de agentes' };
+    }
+    return { ok: true, path };
+  }
+
+  /** Todos os agentes, inclusive subagentes (para a biblioteca). */
+  async fetchAllAgents(): Promise<AgentOption[]> {
+    const payload = await this.request('/api/agent', undefined, true);
+    const list: any[] = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
+    return list
+      .filter((agent) => agent?.id)
+      .map((agent) => ({
+        id: String(agent.id),
+        label: String(agent.name ?? agent.id),
+        description: agent.description ? String(agent.description) : undefined,
+        mode: agent.mode === 'subagent' || agent.mode === 'primary' || agent.mode === 'all' ? agent.mode : undefined,
+      }));
   }
 
   /** Agentes principais do PC (build tem ferramentas, plan só lê). */
@@ -1023,12 +1135,19 @@ function normalizeModels(payload: any, providerNames?: Map<string, string>): Mod
     const value = `${providerID}/${id}`;
     if (seen.has(value)) continue;
     seen.add(value);
+    const variants = Array.isArray(model.variants)
+      ? model.variants
+          .map((variant: any) => String(variant?.id ?? variant ?? ''))
+          .filter((variant: string) => variant.length > 0)
+      : undefined;
+
     out.push({
       value,
       label: String(model.name ?? id),
       provider: providerNames?.get(providerID) ?? providerID,
       providerID,
       modelID: id,
+      variants: variants && variants.length > 0 ? variants : undefined,
     });
   }
 

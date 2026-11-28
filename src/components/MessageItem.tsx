@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AlertTriangle, Brain, ChevronDown, ChevronRight, Wrench } from 'lucide-react-native';
 import { useTheme } from '@/hooks/useTheme';
+import { Avatar } from './Avatar';
+import { ThinkingIndicator } from './ThinkingIndicator';
 import { fonts, radius, space } from '@/theme';
 import { MessagePart, OpenCodeMessage, ToolPart } from '@/types';
 import { formatCount, truncate } from '@/utils/format';
@@ -188,9 +190,7 @@ export const MessageItem = React.memo(function MessageItem({
       <View style={styles.assistantRow}>
         <View style={styles.avatarColumn}>
           {showAvatar ? (
-            <View style={[styles.avatar, { backgroundColor: colors.primaryMuted, borderColor: colors.border }]}>
-              <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '800' }}>OC</Text>
-            </View>
+            <Avatar size={24} style={{ borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }} />
           ) : (
             <View style={styles.avatarSpacer} />
           )}
@@ -206,10 +206,7 @@ export const MessageItem = React.memo(function MessageItem({
               <Markdown text={text} fontSize={fontSize} />
             </View>
           ) : message.streaming ? (
-            <View style={styles.thinkingRow}>
-              <Text style={[styles.thinkingText, { color: colors.mutedForeground }]}>pensando</Text>
-              <Caret />
-            </View>
+            <ThinkingIndicator />
           ) : null}
 
           {message.error ? (
@@ -262,8 +259,6 @@ const styles = StyleSheet.create({
   },
   avatarSpacer: { width: 24 },
   assistantBody: { flex: 1, paddingLeft: 10 },
-  thinkingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  thinkingText: { fontSize: 13, fontWeight: '500' },
   reasoning: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.md,

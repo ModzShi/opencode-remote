@@ -2,7 +2,7 @@
   "expo": {
     "name": "OpenCode Remote",
     "slug": "opencode-remote",
-    "version": "1.2.4",
+    "version": "1.3.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -10,7 +10,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.opencode.remote",
-      "buildNumber": "12",
+      "buildNumber": "13",
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "OpenCode Remote precisa acessar a rede local para conectar ao seu PC",
         "NSBonjourServices": [
@@ -19,7 +19,8 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "OpenCode Remote usa a câmera para escanear o QR Code de pareamento do OpenCode",
         "NSMicrophoneUsageDescription": "OpenCode Remote usa o microfone para o Rafael ouvir sua voz",
-        "NSSpeechRecognitionUsageDescription": "OpenCode Remote transcreve sua fala para o Rafael responder"
+        "NSSpeechRecognitionUsageDescription": "OpenCode Remote transcreve sua fala para o Rafael responder",
+        "NSPhotoLibraryUsageDescription": "OpenCode Remote acessa suas fotos para enviar imagens no chat"
       }
     },
     "android": {
@@ -49,6 +50,14 @@
         }
       ],
       "expo-audio",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "OpenCode Remote acessa suas fotos para enviar imagens no chat."
+        }
+      ],
+      "expo-document-picker",
+      "expo-notifications",
       [
         "expo-speech-recognition",
         {
